@@ -3,21 +3,29 @@ Live CDC simulator.
 
 The Simulator runs a continuous loop that generates realistic OLTP traffic:
 inserts (new customers, new orders), updates (order status transitions,
-payment completions, shipment tracking), and occasional deletes (test record
-cleanup). Every write goes through psycopg2 so it lands in the PostgreSQL
-WAL (Write-Ahead Log) and DMS picks it up as a CDC event.
+payment completions, shipment tracking), and occasional deletes (cancelled
+orders, refunds). Every write goes through psycopg2 so it lands in the
+PostgreSQL WAL and DMS picks it up as a CDC event.
 
 Tick model:
     Each "tick" is one iteration of the main loop. Every tick:
-    1. Place N new orders (with items and payment).
-    2. Advance ~20% of pending/confirmed/processing/shipped orders by one status.
-    3. Update shipment delivery status for in-transit shipments.
-    4. Occasionally (1% chance per tick) cancel a pending order.
-    5. Occasionally (0.5% chance per tick) process a refund.
-    6. Sleep for TICK_INTERVAL_SECONDS.
+    1. Check order count against the environment limit. If the limit is not
+       reached, place N new orders (with items and payment).
+    2. Advance ~20% of pending/confirmed/processing/shipped orders by one step.
+    3. Advance shipment delivery statuses for in-transit shipments.
+    4. Randomly (1% chance per tick) cancel a pending order.
+    5. Randomly (0.5% chance per tick) process a refund on a delivered order.
+    6. Occasionally (15% chance per tick) add a new customer.
+    7. Sleep for TICK_INTERVAL_SECONDS.
 
-    The probabilities are chosen so that a realistic mix of events flows
-    through DMS at a steady pace without flooding the database.
+Error handling contract:
+- DatabaseConnectionError is caught in the main loop and triggers a reconnect.
+  Transient network blips should not crash the simulator.
+- SimulationError and all other exceptions bubble up and crash the process.
+  A loudly crashed process is better than a silently broken one producing
+  wrong data in the pipeline.
+- Nothing fails silently. Every unexpected outcome is logged at ERROR level
+  before being raised.
 """
 
 from __future__ import annotations
@@ -27,15 +35,17 @@ import random
 import time
 from datetime import datetime, timezone
 
+import psycopg2
+from faker import Faker
+
 from simulator.config import (
-    CANCELLATION_RATE,
-    REFUND_RATE,
     DeliveryStatus,
     OrderStatus,
     PaymentStatus,
     SimulationConfig,
 )
 from simulator.db import DatabaseManager
+from simulator.exceptions import DatabaseConnectionError, SimulationError
 from simulator.models import (
     Customer,
     Order,
@@ -44,19 +54,13 @@ from simulator.models import (
     Shipment,
 )
 
-from faker import Faker
-
 logger = logging.getLogger(__name__)
 
-# Fraction of in-progress orders to advance per tick.
-# 0.2 = 20% of pending/confirmed/processing/shipped orders move forward each tick.
 _ADVANCE_RATE: float = 0.20
-
-# Probability per tick that a random pending order gets cancelled.
 _CANCEL_RATE_PER_TICK: float = 0.01
-
-# Probability per tick that a random delivered order gets a refund request.
 _REFUND_RATE_PER_TICK: float = 0.005
+# Refresh the cached order count every N ticks (not every tick — unnecessary DB load)
+_ORDER_COUNT_REFRESH_INTERVAL: int = 50
 
 
 class Simulator:
@@ -65,7 +69,7 @@ class Simulator:
 
     Usage:
         sim = Simulator(db, sim_config)
-        sim.run()        # blocks forever — use Ctrl+C to stop
+        sim.run()        # blocks until Ctrl+C or unrecoverable error
     """
 
     def __init__(self, db: DatabaseManager, config: SimulationConfig) -> None:
@@ -73,6 +77,8 @@ class Simulator:
         self._config = config
         self._fake = Faker()
         self._tick_count = 0
+        # Cached order count to avoid querying COUNT(*) every tick
+        self._cached_order_count: int = 0
 
     # ── Public entry point ────────────────────────────────────────────────────
 
@@ -80,18 +86,35 @@ class Simulator:
         """
         Start the simulation loop.
 
-        Runs until interrupted (KeyboardInterrupt / SIGINT).
-        Logs a summary line every 10 ticks.
+        Handles DatabaseConnectionError gracefully (reconnects and continues).
+        All other exceptions crash the process — this is intentional.
+        Logs a stats summary every 10 ticks.
         """
         logger.info(
-            "Simulator starting: %d new orders/tick, %.1fs tick interval",
+            "Simulator starting — environment limit: %d orders, "
+            "%d new orders/tick, %.1fs tick interval",
+            self._config.max_orders,
             self._config.new_orders_per_tick,
             self._config.tick_interval_seconds,
         )
+        # Fetch the current order count so we start with accurate state
+        self._refresh_order_count()
+
         try:
             while True:
-                self._tick()
+                try:
+                    self._tick()
+                except DatabaseConnectionError as exc:
+                    logger.error(
+                        "Database connection lost on tick %d: %s — reconnecting",
+                        self._tick_count,
+                        exc,
+                    )
+                    self._db.connect()
+                    logger.info("Reconnected — resuming simulation")
+
                 time.sleep(self._config.tick_interval_seconds)
+
         except KeyboardInterrupt:
             logger.info("Simulator stopped after %d ticks", self._tick_count)
 
@@ -100,14 +123,28 @@ class Simulator:
     def _tick(self) -> None:
         self._tick_count += 1
 
-        # 1. Place new orders
-        for _ in range(self._config.new_orders_per_tick):
-            self._place_new_order()
+        # Refresh the cached order count periodically
+        if self._tick_count % _ORDER_COUNT_REFRESH_INTERVAL == 1:
+            self._refresh_order_count()
+
+        # 1. Place new orders only if the environment limit has not been reached
+        if self._cached_order_count < self._config.max_orders:
+            for _ in range(self._config.new_orders_per_tick):
+                self._place_new_order()
+                self._cached_order_count += 1
+                if self._cached_order_count >= self._config.max_orders:
+                    break
+        elif self._tick_count % 10 == 0:
+            logger.info(
+                "Order limit reached (%d/%d) — processing existing orders only",
+                self._cached_order_count,
+                self._config.max_orders,
+            )
 
         # 2. Advance in-progress orders
         self._advance_orders()
 
-        # 3. Update shipment statuses
+        # 3. Update shipment delivery statuses
         self._advance_shipments()
 
         # 4. Randomly cancel a pending order
@@ -118,73 +155,113 @@ class Simulator:
         if random.random() < _REFUND_RATE_PER_TICK:
             self._refund_random_delivered_order()
 
-        # 6. Occasionally add a brand-new customer (organic growth)
+        # 6. Occasionally add a new customer (organic growth)
         if random.random() < 0.15:
             self._add_new_customer()
 
         if self._tick_count % 10 == 0:
             self._log_stats()
 
+    def _refresh_order_count(self) -> None:
+        """Fetch the current order count from the database into the local cache."""
+        row = self._db.fetch_one("SELECT COUNT(*) FROM orders")
+        if row is None:
+            raise SimulationError(
+                "SELECT COUNT(*) FROM orders returned None. "
+                "This should never happen — check database connectivity and schema."
+            )
+        self._cached_order_count = int(row[0])
+
     # ── New order flow ────────────────────────────────────────────────────────
 
     def _place_new_order(self) -> None:
         """
         Select a random customer, create an order with 1-4 items, and
-        immediately attach a payment. The order starts in PENDING status —
-        subsequent ticks will advance it through the lifecycle.
-        """
-        customer_ids = self._db.fetch_column("SELECT customer_id FROM customers ORDER BY random() LIMIT 50")
-        if not customer_ids:
-            logger.warning("No customers found — skipping new order")
-            return
-        customer_id = random.choice(customer_ids)
+        immediately attach a payment.
 
-        # Pick 1-4 random products
+        Raises SimulationError if required data (customers, products) is
+        missing — this means the database was not seeded before simulation.
+        """
+        customer_ids = self._db.fetch_column(
+            "SELECT customer_id FROM customers ORDER BY random() LIMIT 50"
+        )
+        if not customer_ids:
+            raise SimulationError(
+                "No customers found in the database. "
+                "Run 'python main.py seed' before starting the simulator."
+            )
+
         product_rows = self._db.fetch_all(
-            "SELECT product_id, unit_price FROM products WHERE stock_qty > 0 ORDER BY random() LIMIT 4"
+            "SELECT product_id, unit_price FROM products "
+            "WHERE stock_qty > 0 ORDER BY random() LIMIT 4"
         )
         if not product_rows:
-            logger.warning("No products with stock — skipping new order")
+            logger.warning(
+                "No products with stock available — skipping order creation this tick. "
+                "Stock will replenish as orders are cancelled or refunded."
+            )
             return
 
-        # Insert the order
+        customer_id = random.choice(customer_ids)
         now = datetime.now(tz=timezone.utc)
+
         row = self._db.fetch_one(
-            "INSERT INTO orders (customer_id, order_date, order_status) VALUES (%s, %s, %s) RETURNING order_id",
+            "INSERT INTO orders (customer_id, order_date, order_status) "
+            "VALUES (%s, %s, %s) RETURNING order_id",
             (customer_id, now, OrderStatus.PENDING),
         )
         if row is None:
-            return
+            raise SimulationError(
+                f"INSERT INTO orders RETURNING order_id returned None for customer_id={customer_id}. "
+                "Check database constraints and permissions."
+            )
         order_id: int = row[0]
 
-        # Insert items and tally total
         order_total = 0.0
         for product_id, unit_price in product_rows:
             item = OrderItem.generate(order_id, product_id, float(unit_price))
+            try:
+                self._db.execute(
+                    "INSERT INTO order_items "
+                    "(order_id, product_id, quantity, unit_price, line_total) "
+                    "VALUES (%s,%s,%s,%s,%s)",
+                    item.as_insert_tuple(),
+                )
+            except psycopg2.Error as exc:
+                raise SimulationError(
+                    f"Failed to insert order item for order {order_id}: {exc}"
+                ) from exc
+
             self._db.execute(
-                "INSERT INTO order_items (order_id, product_id, quantity, unit_price, line_total) VALUES (%s,%s,%s,%s,%s)",
-                item.as_insert_tuple(),
-            )
-            order_total += item.line_total
-            # Decrement stock
-            self._db.execute(
-                "UPDATE products SET stock_qty = GREATEST(stock_qty - %s, 0) WHERE product_id = %s",
+                "UPDATE products SET stock_qty = GREATEST(stock_qty - %s, 0) "
+                "WHERE product_id = %s",
                 (item.quantity, product_id),
             )
+            order_total += item.line_total
 
-        # Insert payment (immediately completed — simulates online payment at checkout)
         payment = Payment.generate(
             order_id=order_id,
             amount=round(order_total, 2),
             payment_date=now,
             status=PaymentStatus.COMPLETED,
         )
-        self._db.execute(
-            "INSERT INTO payments (order_id, method, amount, status, payment_date) VALUES (%s,%s,%s,%s,%s)",
-            payment.as_insert_tuple(),
-        )
+        try:
+            self._db.execute(
+                "INSERT INTO payments (order_id, method, amount, status, payment_date) "
+                "VALUES (%s,%s,%s,%s,%s)",
+                payment.as_insert_tuple(),
+            )
+        except psycopg2.Error as exc:
+            raise SimulationError(
+                f"Failed to insert payment for order {order_id}: {exc}"
+            ) from exc
 
-        logger.debug("New order %d placed for customer %d (total: %.2f)", order_id, customer_id, order_total)
+        logger.debug(
+            "New order %d placed for customer %d (total: %.2f)",
+            order_id,
+            customer_id,
+            order_total,
+        )
 
     # ── Status advancement ────────────────────────────────────────────────────
 
@@ -192,10 +269,8 @@ class Simulator:
         """
         Advance a fraction of non-terminal orders by one lifecycle step.
 
-        This generates UPDATE events on the orders table, which DMS captures
-        as change records.
+        Generates UPDATE events on the orders table, which DMS captures.
         """
-        # Fetch in-progress order IDs (not terminal)
         rows = self._db.fetch_all(
             """
             SELECT order_id, order_status
@@ -208,11 +283,10 @@ class Simulator:
         if not rows:
             return
 
-        # Advance a fraction of them
         sample_size = max(1, int(len(rows) * _ADVANCE_RATE))
         to_advance = random.sample(rows, min(sample_size, len(rows)))
-
         now = datetime.now(tz=timezone.utc)
+
         for order_id, current_status in to_advance:
             next_status = self._next_order_status(current_status)
             if next_status == current_status:
@@ -223,33 +297,42 @@ class Simulator:
                 (next_status, order_id),
             )
 
-            # When order moves to SHIPPED, create a shipment record
             if next_status == OrderStatus.SHIPPED:
                 self._create_shipment(order_id, now)
 
             logger.debug("Order %d: %s → %s", order_id, current_status, next_status)
 
     def _next_order_status(self, current: str) -> str:
-        """Return the next status in the lifecycle, or the same if already at end."""
+        """Return the next status in the lifecycle, or the current if already terminal."""
         try:
             idx = OrderStatus.LIFECYCLE.index(current)
         except ValueError:
+            logger.warning(
+                "Order has unrecognised status %r — cannot advance lifecycle", current
+            )
             return current
         if idx + 1 < len(OrderStatus.LIFECYCLE):
             return OrderStatus.LIFECYCLE[idx + 1]
         return current
 
     def _create_shipment(self, order_id: int, shipped_date: datetime) -> None:
-        """Create a new shipment record when an order is first shipped."""
+        """Create a shipment record when an order moves to SHIPPED."""
         shipment = Shipment.generate(
             order_id=order_id,
             shipped_date=shipped_date,
             delivery_status=DeliveryStatus.IN_TRANSIT,
         )
-        self._db.execute(
-            "INSERT INTO shipments (order_id, carrier, delivery_status, shipped_date, delivered_date) VALUES (%s,%s,%s,%s,%s)",
-            shipment.as_insert_tuple(),
-        )
+        try:
+            self._db.execute(
+                "INSERT INTO shipments "
+                "(order_id, carrier, delivery_status, shipped_date, delivered_date) "
+                "VALUES (%s,%s,%s,%s,%s)",
+                shipment.as_insert_tuple(),
+            )
+        except psycopg2.Error as exc:
+            raise SimulationError(
+                f"Failed to create shipment for order {order_id}: {exc}"
+            ) from exc
 
     # ── Shipment advancement ──────────────────────────────────────────────────
 
@@ -273,8 +356,8 @@ class Simulator:
 
         sample_size = max(1, int(len(rows) * _ADVANCE_RATE))
         to_advance = random.sample(rows, min(sample_size, len(rows)))
-
         now = datetime.now(tz=timezone.utc)
+
         for shipment_id, current_status in to_advance:
             next_status = self._next_delivery_status(current_status)
             if next_status == current_status:
@@ -282,7 +365,8 @@ class Simulator:
 
             if next_status == DeliveryStatus.DELIVERED:
                 self._db.execute(
-                    "UPDATE shipments SET delivery_status = %s, delivered_date = %s WHERE shipment_id = %s",
+                    "UPDATE shipments SET delivery_status = %s, delivered_date = %s "
+                    "WHERE shipment_id = %s",
                     (next_status, now, shipment_id),
                 )
             else:
@@ -298,6 +382,9 @@ class Simulator:
         try:
             idx = DeliveryStatus.LIFECYCLE.index(current)
         except ValueError:
+            logger.warning(
+                "Shipment has unrecognised status %r — cannot advance lifecycle", current
+            )
             return current
         if idx + 1 < len(DeliveryStatus.LIFECYCLE):
             return DeliveryStatus.LIFECYCLE[idx + 1]
@@ -308,21 +395,18 @@ class Simulator:
     def _cancel_random_pending_order(self) -> None:
         """Cancel one random pending or confirmed order."""
         row = self._db.fetch_one(
-            """
-            SELECT order_id FROM orders
-            WHERE order_status IN ('pending', 'confirmed')
-            ORDER BY random()
-            LIMIT 1
-            """
+            "SELECT order_id FROM orders "
+            "WHERE order_status IN ('pending', 'confirmed') "
+            "ORDER BY random() LIMIT 1"
         )
         if row is None:
-            return
+            return  # No pending orders right now — this is fine, not an error
         order_id = row[0]
+
         self._db.execute(
             "UPDATE orders SET order_status = %s WHERE order_id = %s",
             (OrderStatus.CANCELLED, order_id),
         )
-        # Refund any payment
         self._db.execute(
             "UPDATE payments SET status = %s WHERE order_id = %s AND status = 'completed'",
             (PaymentStatus.REFUNDED, order_id),
@@ -332,16 +416,13 @@ class Simulator:
     def _refund_random_delivered_order(self) -> None:
         """Mark a random delivered order as refunded."""
         row = self._db.fetch_one(
-            """
-            SELECT order_id FROM orders
-            WHERE order_status = 'delivered'
-            ORDER BY random()
-            LIMIT 1
-            """
+            "SELECT order_id FROM orders WHERE order_status = 'delivered' "
+            "ORDER BY random() LIMIT 1"
         )
         if row is None:
-            return
+            return  # No delivered orders yet — fine
         order_id = row[0]
+
         self._db.execute(
             "UPDATE orders SET order_status = %s WHERE order_id = %s",
             (OrderStatus.REFUNDED, order_id),
@@ -359,12 +440,18 @@ class Simulator:
     # ── Customer growth ───────────────────────────────────────────────────────
 
     def _add_new_customer(self) -> None:
-        """Insert a new customer record — simulates organic sign-ups."""
+        """Insert a new customer — simulates organic sign-ups."""
         customer = Customer.generate(self._fake)
-        self._db.execute(
-            "INSERT INTO customers (first_name, last_name, email, country, phone, signup_date) VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (email) DO NOTHING",
+        # ON CONFLICT DO NOTHING: email must be unique. A collision (two fake
+        # customers generating the same email) is not an error — just skip it.
+        rows_affected = self._db.execute(
+            "INSERT INTO customers "
+            "(first_name, last_name, email, country, phone, signup_date) "
+            "VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (email) DO NOTHING",
             customer.as_insert_tuple(),
         )
+        if rows_affected == 0:
+            logger.debug("Skipped duplicate customer email — not an error")
 
     # ── Stats ─────────────────────────────────────────────────────────────────
 
@@ -373,17 +460,23 @@ class Simulator:
         row = self._db.fetch_one(
             """
             SELECT
-                (SELECT COUNT(*) FROM customers)   AS customers,
-                (SELECT COUNT(*) FROM orders)       AS orders,
-                (SELECT COUNT(*) FROM order_items)  AS items,
-                (SELECT COUNT(*) FROM payments)     AS payments,
-                (SELECT COUNT(*) FROM shipments)    AS shipments
+                (SELECT COUNT(*) FROM customers)  AS customers,
+                (SELECT COUNT(*) FROM orders)      AS orders,
+                (SELECT COUNT(*) FROM order_items) AS items,
+                (SELECT COUNT(*) FROM payments)    AS payments,
+                (SELECT COUNT(*) FROM shipments)   AS shipments
             """
         )
-        if row:
-            customers, orders, items, payments, shipments = row
-            logger.info(
-                "[tick %d] customers=%d  orders=%d  items=%d  payments=%d  shipments=%d",
-                self._tick_count,
-                customers, orders, items, payments, shipments,
-            )
+        if row is None:
+            logger.error("Could not fetch stats — stats query returned None")
+            return
+        customers, orders, items, payments, shipments = row
+        logger.info(
+            "[tick %d] customers=%d  orders=%d  items=%d  payments=%d  shipments=%d",
+            self._tick_count,
+            customers,
+            orders,
+            items,
+            payments,
+            shipments,
+        )
