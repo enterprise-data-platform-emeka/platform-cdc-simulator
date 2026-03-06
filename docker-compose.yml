@@ -22,7 +22,8 @@ services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_DB: ecommerce
+      # POSTGRES_DB is intentionally not set here. Both databases (ecommerce
+      # and ecommerce_test) are created by the init script below instead.
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: localpass
     ports:
@@ -33,6 +34,11 @@ services:
       # Named volume persists data between docker-compose down / up cycles.
       # Remove with: docker volume rm platform-cdc-simulator_postgres_data
       - postgres_data:/var/lib/postgresql/data
+      # Init script creates both databases on first startup.
+      # ecommerce      → simulator data (make schema / make seed / make simulate)
+      # ecommerce_test → integration test data (make test-integration)
+      # This keeps them completely isolated so tests can never wipe simulator data.
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s

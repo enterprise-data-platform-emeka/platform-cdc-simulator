@@ -189,6 +189,114 @@ The integration tests run against a real PostgreSQL database that GitHub spins u
 
 ---
 
+## How the files depend on each other
+
+Every Python file has one clearly defined role, and those roles form layers. A file in a higher layer only imports from lower layers — never sideways into the same layer and never upward. This one-way flow makes the code predictable: if I change `exceptions.py`, every file above it might be affected. If I change `simulate.py`, only `main.py` calls it.
+
+Read the diagram top-to-bottom. Arrows (`--imports-->`) point toward the file being imported.
+
+```
+  INFRASTRUCTURE  (not Python source — these set up the environment)
+  ─────────────────────────────────────────────────────────────────────────
+  .env  ──── load_dotenv() reads ──────────────────────────►  config.py
+  docker-compose.yml + docker/init.sql  ──── starts ──────►  PostgreSQL DB
+  Makefile  ──── calls "python main.py <command>" ────────►  main.py
+  Dockerfile  ──── packages ──────────────────────────────►  main.py (as container)
+  .github/workflows/ci.yml  ──── runs tests and builds ───►  all source files
+
+
+  ┌───────────────────────────────────────────────────────────────────────┐
+  │  LAYER 5 — Entry Point                                                │
+  │                                                                       │
+  │                          main.py                                      │
+  │   parses the CLI command (schema/seed/simulate/reset),                │
+  │   loads all config, opens the DB connection, delegates to the         │
+  │   right class. The only file that imports from every layer below.     │
+  └──────┬──────────────┬───────────────────────────────┬─────────────────┘
+         │              │                               │
+         ▼              ▼                               ▼
+  ┌────────────┐  ┌─────────────┐               ┌────────────┐
+  │  seed.py   │  │ simulate.py │               │ schema.py  │
+  │            │  │             │               │            │
+  │  Seeder    │  │  Simulator  │               │ CREATE and │
+  │  fills DB  │  │  live order │               │ DROP TABLE │
+  │  with 2yrs │  │  traffic    │               │ SQL strings│
+  │  of history│  │  loop       │               └────────────┘
+  └──┬──┬──────┘  └──┬──┬───────┘
+     │  │            │  │
+     │  │  both      │  │  both
+     │  │  import    │  │  import
+     │  └────────────┘  │
+     │                  │
+     ▼                  ▼
+  ┌───────────────────────────────────────────────────────────────────────┐
+  │  LAYER 3 — Database and Models                                        │
+  │                                                                       │
+  │      db.py                            models.py                      │
+  │      ──────                           ─────────                      │
+  │      DatabaseManager                  Customer · Product             │
+  │      connect, retry on failure        Order · OrderItem              │
+  │      cursor (auto commit/rollback)    Payment · Shipment             │
+  │      execute · fetch_all · fetch_one                                 │
+  │                                                                       │
+  │  (db.py and models.py do not import each other)                      │
+  └────────────────────────────┬──────────────────────────────────────────┘
+                               │  both import from
+                               ▼
+  ┌───────────────────────────────────────────────────────────────────────┐
+  │  LAYER 2 — Configuration                                              │
+  │                                                                       │
+  │                         config.py                                     │
+  │                                                                       │
+  │  Domain constants:  OrderStatus · DeliveryStatus · PaymentMethod     │
+  │                     Carrier · ProductCategory · price ranges         │
+  │  Config classes:    DatabaseConfig · SeedConfig · SimulationConfig   │
+  │                     RetryConfig · EnvironmentLimits                  │
+  │  Env helpers:       get_environment() · get_environment_limits()     │
+  └─────────────────────────────┬─────────────────────────────────────────┘
+                                │  imports ConfigurationError
+                                ▼
+  ┌───────────────────────────────────────────────────────────────────────┐
+  │  LAYER 1 — Foundation  (nothing in this project imports INTO         │
+  │            these files — they are the bedrock everything rests on)   │
+  │                                                                       │
+  │   exceptions.py                        schema.py                     │
+  │   ────────────                         ─────────                     │
+  │   SimulatorError (base class)          CREATE TABLE SQL              │
+  │   ConfigurationError                   DROP TABLE SQL                │
+  │   DatabaseConnectionError              indexes and triggers          │
+  │   SchemaError · SeedError              REPLICA IDENTITY FULL         │
+  │   SimulationError                      (pure SQL strings,            │
+  │                                         no Python imports)           │
+  └───────────────────────────────────────────────────────────────────────┘
+
+
+  TESTS
+  ─────────────────────────────────────────────────────────────────────────
+
+  tests/conftest.py  imports  config.py · db.py · schema.py
+         │
+         └── provides shared fixtures to all 5 test files:
+                  │
+                  ├── test_config.py      unit  — tests config.py
+                  ├── test_exceptions.py  unit  — tests exceptions.py
+                  ├── test_models.py      unit  — tests models.py
+                  ├── test_schema.py      unit  — tests schema.py
+                  └── test_db.py          integration — tests db.py
+                                          (needs live PostgreSQL)
+```
+
+**Key things to notice:**
+
+- `exceptions.py` and `schema.py` have no arrows pointing out of them toward other project files. Every other file depends on them, not the reverse. Changing these two files has the widest blast radius.
+- `seed.py` and `simulate.py` are side-by-side in Layer 4 but they never import each other. Seeding and simulating are completely independent operations.
+- `main.py` is the only file that imports from every other layer. If you want to understand the full picture of how a command runs, `main.py` is the place to start.
+- The test files are outside the main dependency chain. They import the modules they test but the source code never imports from tests.
+
+**Practical rule:** if I want to understand how `seed.py` works, I read just three other files: `config.py` (for constants), `db.py` (for database access), and `models.py` (for data generation). Nothing else.
+
+---
+
 ## What each file does
 
 ### Configuration and entry point
@@ -217,8 +325,11 @@ The CLI (Command Line Interface) entry point. It parses the command (`schema`, `
 **`Dockerfile`**
 Packages the simulator as a Docker container image. Uses a two-stage build: stage one installs packages, stage two copies only the installed packages and source code (not the build tools). The final image runs as a non-root user for security. This image can be deployed to AWS ECS (Elastic Container Service) if I ever want to run the simulator in the cloud instead of on my laptop.
 
+**`docker/init.sql`**
+A SQL script that runs automatically the first time the PostgreSQL container starts. It creates two completely separate databases: `ecommerce` (for the simulator's data) and `ecommerce_test` (for the integration test suite). Keeping them separate means the test suite can never wipe my simulator's data, no matter how many times I run the tests.
+
 **`docker-compose.yml`**
-Defines the local development stack: a PostgreSQL container and optionally the simulator container. Running `make docker-up` starts just the PostgreSQL container. Running `make docker-simulate` starts both together.
+Defines the local development stack: a PostgreSQL container and optionally the simulator container. Running `make docker-up` starts just the PostgreSQL container. Running `make docker-simulate` starts both together. The PostgreSQL container mounts `docker/init.sql` so both databases are created on first startup — no manual database creation needed.
 
 ### The `simulator/` package
 
@@ -275,7 +386,7 @@ Database connection errors are caught and trigger a reconnect. All other errors 
 ### Tests
 
 **`tests/conftest.py`**
-Shared test fixtures. The `db` fixture creates a fresh schema before each integration test and drops it after, so every test starts with a clean database.
+Shared test fixtures. The `db` fixture reads the `TEST_DB_NAME` environment variable (defaulting to `ecommerce_test`) to decide which database to connect to. This is the key safety mechanism: because `TEST_DB_NAME` points at `ecommerce_test` rather than `ecommerce`, the fixture's teardown — which drops all tables after each test — can never touch the simulator's database. The `db` fixture creates a fresh schema before each integration test and drops it after, so every test starts with a clean slate in complete isolation.
 
 **`tests/test_exceptions.py`**
 Verifies the exception hierarchy. Every custom exception must inherit from `SimulatorError`, messages must be preserved, and exceptions must be raiseable and catchable.

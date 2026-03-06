@@ -21,6 +21,7 @@ timestamps) from as_insert_tuple() because PostgreSQL generates those.
 from __future__ import annotations
 
 import random
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
@@ -77,8 +78,12 @@ class Customer:
         # which produces obviously fake domains.
         domain = random.choice(["gmail.com", "outlook.com", "yahoo.com",
                                 "hotmail.com", "icloud.com", "proton.me"])
-        suffix = fake.numerify("##") if random.random() < 0.3 else ""
-        email = f"{first.lower()}.{last.lower()}{suffix}@{domain}"
+        # secrets.token_hex(4) gives 8 hex characters (4 billion possibilities).
+        # This guarantees uniqueness even at prod scale (15,000 customers).
+        # A 2-digit suffix added 30% of the time (the previous approach) only
+        # produced ~100 variations per name, causing UniqueViolation errors.
+        unique_tag = secrets.token_hex(4)
+        email = f"{first.lower()}.{last.lower()}.{unique_tag}@{domain}"
         country = _weighted_choice(CUSTOMER_COUNTRIES, CUSTOMER_COUNTRY_WEIGHTS)
         phone = fake.phone_number()
         if signup_date is None:

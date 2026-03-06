@@ -41,13 +41,19 @@ def retry_config() -> RetryConfig:
 
 @pytest.fixture(scope="session")
 def db_config() -> DatabaseConfig:
-    """Read DB config from environment. Required for integration tests."""
+    """
+    Read DB config from environment for integration tests.
+
+    Uses TEST_DB_NAME (not DB_NAME) so the test suite always connects to the
+    dedicated ecommerce_test database, never the main ecommerce database.
+    This means running the full test suite can never wipe simulator data.
+    """
     return DatabaseConfig(
         host=os.getenv("DB_HOST", "localhost"),
         port=int(os.getenv("DB_PORT", "5432")),
-        dbname=os.getenv("DB_NAME", "ecommerce_test"),
+        dbname=os.getenv("TEST_DB_NAME", "ecommerce_test"),
         user=os.getenv("DB_USER", "postgres"),
-        password=os.getenv("DB_PASSWORD", "testpass"),
+        password=os.getenv("DB_PASSWORD", "localpass"),
     )
 
 
