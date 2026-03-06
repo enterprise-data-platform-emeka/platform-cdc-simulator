@@ -158,38 +158,49 @@ Then run `aws --version` again to confirm.
 
 ### Step 3: Check that my AWS credentials are configured
 
-Credentials are like a username and password for AWS. They prove I'm allowed to create and manage resources. The project uses a named profile called `dev-admin` — a set of credentials stored on my Mac.
+The project uses AWS SSO (Single Sign-On) for authentication. Instead of long-lived access keys, SSO issues short-lived temporary credentials that expire automatically. The named profile `dev-admin` is configured to use SSO and targets the dev AWS account.
 
-**In Terminal 1 (Terraform), run:**
+**In Terminal 1 (Terraform), log in first:**
+```bash
+aws sso login --profile dev-admin
+```
+
+This opens a browser window asking me to confirm the login. After approving, the CLI has temporary credentials valid for a few hours.
+
+**Then verify it worked:**
 ```bash
 aws sts get-caller-identity --profile dev-admin
 ```
 
-This command asks AWS "who am I?" using the `dev-admin` credentials. It's harmless — it just verifies the credentials work.
+This asks AWS "who am I?" using the `dev-admin` SSO session. It's harmless — it just confirms the credentials are active.
 
 **Expected output:**
 ```json
 {
-    "UserId": "AIDA...",
+    "UserId": "AROA...:my-username",
     "Account": "123456789012",
-    "Arn": "arn:aws:iam::123456789012:user/my-username"
+    "Arn": "arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_dev-admin.../my-username"
 }
 ```
 
 I note down the 12-digit `Account` number — I'll need it in Part 7 to check the S3 bucket.
 
-**If I see** `The config profile (dev-admin) could not be found`, I configure the credentials:
+**If I see** `The config profile (dev-admin) could not be found`, the SSO profile hasn't been configured yet. I set it up with:
 ```bash
-aws configure --profile dev-admin
+aws configure sso --profile dev-admin
 ```
 
-It asks four questions:
-- **AWS Access Key ID** — from the IAM console or from whoever set up the AWS account
-- **AWS Secret Access Key** — the corresponding secret key
-- **Default region** — I type `eu-central-1`
-- **Default output format** — I type `json`
+It asks:
+- **SSO session name** — any name, for example `edp-dev`
+- **SSO start URL** — the URL for my organisation's AWS SSO portal (from whoever set up the AWS accounts)
+- **SSO region** — `eu-central-1`
+- **SSO registration scopes** — press Enter to accept the default
+- **AWS account ID** — the dev account ID
+- **Role name** — the SSO permission set name (for example `AdministratorAccess`)
+- **Default region** — `eu-central-1`
+- **Default output format** — `json`
 
-After configuring, I run `aws sts get-caller-identity --profile dev-admin` again to confirm it works.
+After configuring, I run `aws sso login --profile dev-admin`, approve in the browser, then run `aws sts get-caller-identity --profile dev-admin` to confirm it works.
 
 ---
 
