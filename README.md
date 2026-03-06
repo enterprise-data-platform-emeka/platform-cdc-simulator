@@ -99,12 +99,15 @@ make help             # show all available commands
 make setup            # create .venv and install dependencies
 make lint             # check code style with ruff
 make typecheck        # check types with mypy
-make test             # run all tests
+make test             # run all tests (local, reads .env)
 make test-unit        # run unit tests only (no database needed)
 make test-integration # run integration tests (needs PostgreSQL)
-make schema           # create database tables
-make seed             # seed historical data
-make simulate         # run the live simulation loop
+make schema           # create database tables (local Docker)
+make schema ENV=dev   # create tables on AWS dev RDS (password from SSM)
+make seed             # seed historical data (local Docker)
+make seed ENV=dev     # seed on AWS dev RDS (password from SSM)
+make simulate         # run the live simulation loop (local Docker)
+make simulate ENV=dev # run against AWS dev RDS (password from SSM)
 make reset            # drop all tables, recreate, reseed (destroys data)
 make docker-up        # start local PostgreSQL in Docker
 make docker-down      # stop Docker containers
@@ -112,31 +115,36 @@ make docker-build     # build the simulator as a Docker image
 make clean            # remove .venv and cache files
 ```
 
+Replace `ENV=dev` with `ENV=staging` or `ENV=prod` to target other AWS environments. All three use the same pattern: password fetched from SSM, tunnel on `localhost:5433`.
+
 ---
 
 ## Switching from local to AWS
 
-To point the simulator at the AWS RDS (Relational Database Service) instance instead of Docker, I update three lines in `.env`:
-
-```
-DB_HOST=edp-dev-postgres.xxxxxx.eu-central-1.rds.amazonaws.com
-DB_PORT=5432
-DB_PASSWORD=<my RDS password>
-```
-
-No code changes. Everything else stays the same.
-
-If the RDS instance is in a private VPC (Virtual Private Cloud) with no public access (which it is, by design), I connect via an SSM (Systems Manager) port-forwarding tunnel:
+I don't edit `.env` to switch environments. I pass `ENV=dev`, `ENV=staging`, or `ENV=prod` to any Makefile command:
 
 ```bash
-aws ssm start-session \
-    --target i-<your-ec2-instance-id> \
-    --document-name AWS-StartPortForwardingSessionToRemoteHost \
-    --parameters "host=<rds-endpoint>,portNumber=5432,localPortNumber=5433" \
-    --profile dev-admin
+make schema ENV=dev      # create tables on AWS dev RDS
+make seed   ENV=dev      # seed historical data
+make simulate ENV=dev    # run the live loop
 ```
 
-Then set `DB_HOST=localhost` and `DB_PORT=5433` in `.env`. The tunnel makes the remote RDS look like a local database.
+The Makefile has an environment selector. When `ENV` is anything other than `local`, it fetches the RDS password live from AWS SSM (Systems Manager) Parameter Store instead of reading `.env`. Terraform stores the password in SSM at `/edp/{env}/rds/db_password` when the infrastructure is applied, so no password file ever needs to exist on my Mac.
+
+**What the Makefile does automatically when `ENV=dev`:**
+
+1. Sets `DB_HOST=localhost` and `DB_PORT=5433` (the local end of the SSM tunnel)
+2. Calls `aws ssm get-parameter --name /edp/dev/rds/db_password --with-decryption --profile dev-admin` to fetch the password
+3. Exports all other variables (`DB_NAME`, `DB_USER`, etc.) inline
+4. Runs the simulator with all those values set as environment variables
+
+**Prerequisites for AWS environments:**
+
+- The SSM tunnel must be open in a separate terminal (see `cloud_setup_guide.md`)
+- AWS profile `dev-admin` (or `staging-admin` / `prod-admin`) must be configured
+- The infrastructure must have been applied with `make apply dev` so the SSM parameter exists
+
+The `.env` file is only used when running locally against Docker. It is never touched for AWS runs.
 
 ---
 
@@ -318,6 +326,8 @@ A template showing every environment variable the simulator reads. I copy this t
 
 **`Makefile`**
 A shortcut file. Instead of remembering long commands like `python main.py simulate` or `.venv/bin/pytest tests/ -m "not integration"`, I run `make simulate` or `make test-unit`. The Makefile also handles virtual environment paths so commands work correctly regardless of whether the venv is activated.
+
+The Makefile has an `ENV` selector (default: `local`). When `ENV=dev`, `ENV=staging`, or `ENV=prod` is passed, it fetches the database password live from AWS SSM (Systems Manager) Parameter Store using the matching AWS profile (`dev-admin`, `staging-admin`, or `prod-admin`). No password file is created or stored on disk for AWS environments.
 
 **`main.py`**
 The CLI (Command Line Interface) entry point. It parses the command (`schema`, `seed`, `simulate`, `reset`), loads all configuration from environment variables, raises a clear error if anything is missing, then calls the right function. It also sets up logging so every log line shows the time, level, and which module it came from.

@@ -24,10 +24,10 @@ Here is the full picture of all three terminals and when each one is open:
   ─────────────────────────       ──────────────────────        ────────────────────────
   Open from the start             Open in Part 4                Open in Part 5
 
-  - install tool checks           - run the SSM tunnel           - update .env
-  - terraform init/plan/apply     - leave it running,            - make schema
-  - reboot RDS                    do NOT close this              - make seed
-  - start DMS task                terminal until                 - make simulate
+  - install tool checks           - run the SSM tunnel           - make schema ENV=dev
+  - terraform init/plan/apply     - leave it running,            - make seed ENV=dev
+  - reboot RDS                    do NOT close this              - make simulate ENV=dev
+  - start DMS task                terminal until
   - check S3                      teardown
   - terraform destroy
 ```
@@ -383,7 +383,7 @@ aws_db_instance.source: Creation complete after 13m42s
 
 **I leave Terminal 1 alone and wait.** The apply takes about 15 to 20 minutes. RDS takes the longest.
 
-When it finishes, Terraform prints the outputs I defined. **This is important — I copy all four output values and save them somewhere (a text file, a note app, anything):**
+When it finishes, Terraform prints the outputs I defined. **The most important one to copy is `ssm_tunnel_command` — I'll need it in Step 14 to open the secure tunnel:**
 
 ```
 Outputs:
@@ -403,12 +403,9 @@ EOT
 ssm_tunnel_command = "aws ssm start-session --target i-0abc123def456789 --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters 'host=edp-dev-source-db.abc123.eu-central-1.rds.amazonaws.com,portNumber=5432,localPortNumber=5433' --profile dev-admin"
 ```
 
-If I missed the outputs, I can print them again at any time:
-```bash
-cd /Users/chuquemeka/enterprise-data-platform/terraform-platform-infra-live
-make plan dev
-```
-Or just run:
+**Note on `simulator_env_block`:** This output is now informational only. I do not need to paste it into `.env`. The Makefile automatically handles the connection settings when I run `make schema ENV=dev` — it fetches the database password from AWS SSM (Systems Manager) Parameter Store and sets all variables at runtime. No file editing is required.
+
+If I missed the outputs, I can print them again:
 ```bash
 cd terraform-platform-infra-live/environments/dev && terraform output
 ```
@@ -540,7 +537,9 @@ Waiting for connections...
 
 ## Part 5: Set up the simulator for AWS
 
-> **Steps in this part open a new Terminal 3 named "Simulator" and edit .env**
+> **Steps in this part open a new Terminal 3 named "Simulator"**
+
+No `.env` editing is needed for AWS environments. The Makefile handles all connection settings automatically when `ENV=dev` is passed.
 
 ---
 
@@ -572,50 +571,30 @@ cd /Users/chuquemeka/enterprise-data-platform/platform-cdc-simulator
 
 ---
 
-### Step 17: Update the .env file to point at RDS
+### Step 17: How the simulator connects to AWS (no .env editing needed)
 
-The `.env` file currently points at the local Docker database. I need to update it to point at RDS through the SSM tunnel.
+When I run any simulator command with `ENV=dev`, the Makefile does all of this automatically:
 
-**In Terminal 3 (Simulator), open .env in a text editor:**
+1. Sets `DB_HOST=localhost` and `DB_PORT=5433` — the local end of the SSM tunnel in Terminal 2
+2. Calls `aws ssm get-parameter --name /edp/dev/rds/db_password --with-decryption --profile dev-admin` to fetch the RDS password from SSM (Systems Manager) Parameter Store. Terraform stored this password there when I ran `make apply dev` in Step 10.
+3. Exports all other variables (`DB_NAME=ecommerce`, `DB_USER=postgres`, etc.) inline
+4. Runs the simulator with all of those as environment variables
+
+The `.env` file is left completely untouched. I do not edit it. After this test session, `.env` still points at local Docker — ready for local development immediately.
+
+**To verify the SSM parameter exists (optional check):**
+
+**In Terminal 3 (Simulator), run:**
 ```bash
-open -e .env
+aws ssm get-parameter \
+  --name /edp/dev/rds/db_password \
+  --with-decryption \
+  --query Parameter.Value \
+  --output text \
+  --profile dev-admin
 ```
 
-`open -e` opens the file in TextEdit (the built-in Mac text editor). If I prefer a different editor, I can use `code .env` for VS Code or `nano .env` for a terminal editor.
-
-I find the database connection block, which currently looks like this:
-```
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=ecommerce
-DB_USER=postgres
-DB_PASSWORD=localpass
-```
-
-I replace exactly those five lines with the values from the `simulator_env_block` that Terraform printed in Step 10. I fill in my actual `db_password` for the last line:
-```
-DB_HOST=localhost
-DB_PORT=5433
-DB_NAME=ecommerce
-DB_USER=postgres
-DB_PASSWORD=MyRdsPassword123!
-```
-
-The key difference: `DB_PORT` changes from `5432` to `5433`. That `5433` is the local end of the SSM tunnel. When the simulator connects to `localhost:5433`, the tunnel (running in Terminal 2) picks it up and forwards it to RDS.
-
-I leave all other lines in `.env` unchanged (ENVIRONMENT, TEST_DB_NAME, seed settings, etc.).
-
-I save the file and close the editor.
-
-**To verify the change took effect:**
-```bash
-grep DB_PORT .env
-```
-
-**Expected output:**
-```
-DB_PORT=5433
-```
+**Expected output:** the RDS password that was set in Step 7. If this command succeeds, the Makefile can fetch it.
 
 ---
 
@@ -631,8 +610,10 @@ This creates the six tables, indexes, triggers, and sets `REPLICA IDENTITY FULL`
 
 **In Terminal 3 (Simulator), run:**
 ```bash
-make schema
+make schema ENV=dev
 ```
+
+`ENV=dev` tells the Makefile to connect to the AWS dev environment. It sets `DB_PORT=5433` (the SSM tunnel), fetches the password from SSM Parameter Store using the `dev-admin` AWS profile, and runs the command. I do not need to touch `.env`.
 
 **Expected output:**
 ```
@@ -655,7 +636,7 @@ This fills the RDS database with 2 years of historical customers, products, and 
 
 **In Terminal 3 (Simulator), run:**
 ```bash
-make seed
+make seed ENV=dev
 ```
 
 **Expected output:**
@@ -749,7 +730,7 @@ Now I go back to Terminal 3 to start the continuous order loop. DMS will capture
 
 **In Terminal 3 (Simulator), run:**
 ```bash
-make simulate
+make simulate ENV=dev
 ```
 
 **Expected output (lines appear every 2 seconds):**
@@ -823,7 +804,7 @@ Tearing down is the most important part. Running AWS resources costs money even 
 
 ### Step 25: Stop the simulator
 
-**I click on Terminal 3 (Simulator)** where `make simulate` is still running.
+**I click on Terminal 3 (Simulator)** where `make simulate ENV=dev` is still running.
 
 **In Terminal 3 (Simulator), press:** `Ctrl + C`
 
@@ -832,45 +813,11 @@ The simulator stops:
 2026-03-06 10:15:00  INFO  simulator.simulate  Simulator stopped after 150 ticks
 ```
 
-Terminal 3 (Simulator) now shows a regular prompt (`$`). I can type commands in it again, but I only need it for Step 26.
+Terminal 3 (Simulator) now shows a regular prompt (`$`). I do not need to restore `.env` — it was never changed during this session. Terminal 3 is done.
 
 ---
 
-### Step 26: Restore the simulator's .env to local settings
-
-Before destroying the infra, I put `.env` back to its local Docker settings. This means I can still use the simulator locally after this test without having to reconfigure it.
-
-**In Terminal 3 (Simulator), open .env:**
-```bash
-open -e .env
-```
-
-I find the database connection block and change it back to the local values:
-```
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=ecommerce
-DB_USER=postgres
-DB_PASSWORD=localpass
-```
-
-I save and close the editor.
-
-**To confirm the change:**
-```bash
-grep DB_PORT .env
-```
-
-**Expected output:**
-```
-DB_PORT=5432
-```
-
-Terminal 3 (Simulator) is done. I don't need it anymore.
-
----
-
-### Step 27: Close the SSM tunnel
+### Step 26: Close the SSM tunnel
 
 **I click on Terminal 2 (Tunnel)** where the tunnel is still showing `Waiting for connections...`
 
@@ -886,7 +833,7 @@ Terminal 2 (Tunnel) now shows a regular prompt. The tunnel is fully closed.
 
 ---
 
-### Step 28: Destroy the AWS infrastructure
+### Step 27: Destroy the AWS infrastructure
 
 Now I go back to Terminal 1 to destroy everything Terraform created. Terraform reads the same [terraform-platform-infra-live](https://github.com/enterprise-data-platform-emeka/terraform-platform-infra-live) code it used to apply and deletes every resource it built.
 
@@ -925,7 +872,7 @@ Destroy complete! Resources: 47 destroyed.
 
 ---
 
-### Step 29: Verify everything is gone
+### Step 28: Verify everything is gone
 
 **In Terminal 1 (Terraform), run:**
 ```bash
@@ -1025,18 +972,18 @@ aws sts get-caller-identity \
   --profile dev-admin         aws ssm start-session \       cd .../platform-cdc-simulator
 terraform --version             --target <bastion_id> \
 session-manager-plugin \        --document-name \
-  --version                     AWS-StartPortForwarding... \ open -e .env
-                                --parameters \               (change DB_PORT from 5432
-# Set passwords:                'host=<rds_endpoint>,...'     to 5433, set DB_PASSWORD)
-export TF_VAR_db_password=...   --profile dev-admin
-export TF_VAR_redshift_...=...                               make schema
-                              # LEAVE THIS RUNNING           make seed
-# Apply infra:                # DO NOT CLOSE                 make simulate
-cd .../terraform-platform-..
+  --version                     AWS-StartPortForwarding... \
+                                --parameters \               # No .env editing needed.
+# Set passwords:                'host=<rds_endpoint>,...'   # Makefile fetches password
+export TF_VAR_db_password=...   --profile dev-admin         # from SSM automatically.
+export TF_VAR_redshift_...=...
+                              # LEAVE THIS RUNNING           make schema ENV=dev
+# Apply infra:                # DO NOT CLOSE                 make seed ENV=dev
+cd .../terraform-platform-..                                 make simulate ENV=dev
 make init dev
 make plan dev
 make apply dev   # ~15-20min
-# COPY THE OUTPUTS
+# COPY ssm_tunnel_command
 
 # Reboot RDS:
 aws rds reboot-db-instance \
@@ -1063,9 +1010,8 @@ aws s3 ls \
 
 ──────────── TEARDOWN ─────────────────────────────────────────────────────────────────
 
-# Step 25: (Terminal 3)                              Ctrl+C   stop simulator
-# Step 26: (Terminal 3)                              open -e .env → change DB_PORT back to 5432
-# Step 27: (Terminal 2)       Ctrl+C                          close the tunnel
-# Step 28: (Terminal 1)   make destroy dev                    destroy everything
-# Step 29: (Terminal 1)   aws rds describe-db-instances ...   confirm RDS is gone
+# Step 25: (Terminal 3)       Ctrl+C                          stop simulator
+# Step 26: (Terminal 2)       Ctrl+C                          close the tunnel
+# Step 27: (Terminal 1)   make destroy dev                    destroy everything
+# Step 28: (Terminal 1)   aws rds describe-db-instances ...   confirm RDS is gone
 ```

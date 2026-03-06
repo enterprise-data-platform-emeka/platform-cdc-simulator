@@ -1,6 +1,7 @@
 # Environment variables — never commit secrets
+# .env.example is the only exception — it has placeholder values only and is
+# committed to the repo so new developers have a template to copy from.
 .env
-.env.example
 
 # Python bytecode
 __pycache__/

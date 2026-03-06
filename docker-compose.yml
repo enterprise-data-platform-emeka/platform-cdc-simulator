@@ -24,8 +24,8 @@ services:
     environment:
       # POSTGRES_DB is intentionally not set here. Both databases (ecommerce
       # and ecommerce_test) are created by the init script below instead.
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: localpass
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-localpass}
     ports:
       # Maps container port 5432 to your Mac on 5432.
       # After make docker-up, connect with: DB_HOST=localhost DB_PORT=5432
@@ -40,7 +40,7 @@ services:
       # This keeps them completely isolated so tests can never wipe simulator data.
       - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -58,14 +58,14 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      ENVIRONMENT: dev
+      ENVIRONMENT: ${ENVIRONMENT:-dev}
       DB_HOST: postgres       # Use the Docker service name, not localhost
-      DB_PORT: 5432
-      DB_NAME: ecommerce
-      DB_USER: postgres
-      DB_PASSWORD: localpass
-      SIM_TICK_INTERVAL_SECONDS: 2
-      SIM_NEW_ORDERS_PER_TICK: 3
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-ecommerce}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-localpass}
+      SIM_TICK_INTERVAL_SECONDS: ${SIM_TICK_INTERVAL_SECONDS:-2}
+      SIM_NEW_ORDERS_PER_TICK: ${SIM_NEW_ORDERS_PER_TICK:-3}
     command: simulate
     # Do not start the simulator automatically — only when explicitly requested
     profiles:

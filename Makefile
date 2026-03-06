@@ -17,6 +17,50 @@ MYPY       := .venv/bin/mypy
 # Detect if the virtual environment exists
 VENV_EXISTS := $(shell test -d .venv && echo "yes" || echo "no")
 
+# ── Environment selector ───────────────────────────────────────────────────────
+#
+# Controls where the simulator connects. Defaults to local Docker.
+#
+# Usage:
+#   make schema                   connects to local Docker (reads .env)
+#   make schema ENV=dev           connects to AWS dev RDS   (password from SSM)
+#   make schema ENV=staging       connects to AWS staging   (password from SSM)
+#   make schema ENV=prod          connects to AWS prod      (password from SSM)
+#
+# AWS usage requires:
+#   1. SSM tunnel open in a separate terminal (see cloud_setup_guide.md)
+#   2. AWS profile named dev-admin / staging-admin / prod-admin configured
+#   3. make apply dev/staging/prod already run so the SSM parameter exists
+
+ENV ?= local
+
+ifeq ($(ENV),local)
+# Local Docker: source .env file
+RUN := set -a && . .env && set +a &&
+else
+# AWS: all static vars inline, password fetched live from SSM Parameter Store.
+# No password file ever exists on disk.
+RUN := \
+  export DB_HOST=localhost && \
+  export DB_PORT=5433 && \
+  export DB_NAME=ecommerce && \
+  export DB_USER=postgres && \
+  export DB_PASSWORD=$$(aws ssm get-parameter \
+    --name /edp/$(ENV)/rds/db_password \
+    --with-decryption \
+    --query Parameter.Value \
+    --output text \
+    --profile $(ENV)-admin) && \
+  export ENVIRONMENT=$(ENV) && \
+  export TEST_DB_NAME=ecommerce_test && \
+  export SEED_RANDOM_SEED=42 && \
+  export SIM_TICK_INTERVAL_SECONDS=2 && \
+  export SIM_NEW_ORDERS_PER_TICK=3 && \
+  export RETRY_MAX_ATTEMPTS=5 && \
+  export RETRY_WAIT_MIN_SECONDS=1 && \
+  export RETRY_WAIT_MAX_SECONDS=30 &&
+endif
+
 .PHONY: help setup lint typecheck test test-unit test-integration \
         schema seed simulate reset \
         docker-build docker-up docker-down docker-logs docker-simulate \
@@ -39,10 +83,13 @@ help:
 	@echo "    make test-integration   Run integration tests (requires ENVIRONMENT + DB vars)"
 	@echo ""
 	@echo "  Simulator"
-	@echo "    make schema             Create database tables and schema"
-	@echo "    make seed               Seed historical data"
-	@echo "    make simulate           Run the live simulation loop"
-	@echo "    make reset              Drop all tables, recreate schema, reseed"
+	@echo "    make schema             Create tables (local Docker)"
+	@echo "    make schema ENV=dev     Create tables (AWS dev RDS)"
+	@echo "    make schema ENV=staging Create tables (AWS staging RDS)"
+	@echo "    make schema ENV=prod    Create tables (AWS prod RDS)"
+	@echo "    make seed               Seed historical data  (add ENV=dev/staging/prod for AWS)"
+	@echo "    make simulate           Run the live simulation loop  (add ENV=dev/staging/prod for AWS)"
+	@echo "    make reset              Drop all tables, recreate schema, reseed  (supports ENV=)"
 	@echo ""
 	@echo "  Docker"
 	@echo "    make docker-up          Start local PostgreSQL in Docker"
@@ -64,7 +111,8 @@ setup:
 	$(PIP) install -r requirements.txt -r requirements-dev.txt --quiet
 	@echo ""
 	@echo "Setup complete."
-	@echo "Next: copy .env.example to .env and fill in your database credentials."
+	@echo "Next: copy .env.example to .env and fill in your local Docker credentials."
+	@echo "For AWS: run 'make apply dev/staging/prod' first, then use ENV=dev/staging/prod."
 	@echo "Then run: make docker-up && make schema && make seed && make simulate"
 
 # ── Code quality ──────────────────────────────────────────────────────────────
@@ -79,7 +127,7 @@ typecheck:
 
 test:
 	@echo "Running all tests..."
-	$(PYTEST) tests/ --cov=simulator --cov-report=term-missing
+	$(RUN) $(PYTEST) tests/ --cov=simulator --cov-report=term-missing
 
 test-unit:
 	@echo "Running unit tests (no database required)..."
@@ -87,22 +135,23 @@ test-unit:
 
 test-integration:
 	@echo "Running integration tests (requires a running PostgreSQL)..."
-	$(PYTEST) tests/ -m integration -v
+	$(RUN) $(PYTEST) tests/ -m integration -v
 
 # ── Simulator commands ────────────────────────────────────────────────────────
-# These require DB env vars to be set (copy .env.example to .env first).
+# Local: reads .env — run make docker-up first.
+# AWS:   add ENV=dev/staging/prod — fetches password from SSM automatically.
 
 schema:
-	$(PYTHON) main.py schema
+	$(RUN) $(PYTHON) main.py schema
 
 seed:
-	$(PYTHON) main.py seed
+	$(RUN) $(PYTHON) main.py seed
 
 simulate:
-	$(PYTHON) main.py simulate
+	$(RUN) $(PYTHON) main.py simulate
 
 reset:
-	$(PYTHON) main.py reset
+	$(RUN) $(PYTHON) main.py reset
 
 # ── Docker ────────────────────────────────────────────────────────────────────
 
@@ -110,7 +159,7 @@ docker-up:
 	@echo "Starting local PostgreSQL..."
 	docker compose up -d postgres
 	@echo "Waiting for PostgreSQL to be ready..."
-	@docker compose exec postgres sh -c 'until pg_isready -U postgres; do sleep 1; done'
+	@$(RUN) docker compose exec postgres sh -c "until pg_isready -U \$${DB_USER:-postgres}; do sleep 1; done"
 	@echo "PostgreSQL is ready."
 
 docker-down:

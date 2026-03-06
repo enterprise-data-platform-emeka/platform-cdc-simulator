@@ -226,15 +226,13 @@ cp .env.example .env
 
 `cp` means "copy". This copies `.env.example` to a new file called `.env`.
 
-For local development, the `.env.example` file already has the right values pointing at the Docker database I'm about to start. I don't need to change anything right now.
-
-I can open the file to see what's inside:
+`.env.example` is a blank template — it shows which variables are needed but leaves `ENVIRONMENT` and `DB_PASSWORD` empty. I need to fill those two values in:
 
 ```bash
-cat .env
+open -e .env
 ```
 
-The most important lines are:
+This opens the file in TextEdit. I fill in the two empty values for local Docker development:
 
 ```
 ENVIRONMENT=dev
@@ -244,9 +242,17 @@ DB_NAME=ecommerce
 DB_USER=postgres
 DB_PASSWORD=localpass
 TEST_DB_NAME=ecommerce_test
+SEED_RANDOM_SEED=42
+SIM_TICK_INTERVAL_SECONDS=2
+SIM_NEW_ORDERS_PER_TICK=3
+RETRY_MAX_ATTEMPTS=5
+RETRY_WAIT_MIN_SECONDS=1
+RETRY_WAIT_MAX_SECONDS=30
 ```
 
-`ENVIRONMENT=dev` tells the simulator it's in the development environment, which means it will create a maximum of 5,000 orders. `DB_HOST=localhost` means the database is on my own Mac (not in the cloud).
+I save and close the editor.
+
+`ENVIRONMENT=dev` tells the simulator it's in the development environment, which means it will create a maximum of 5,000 orders. `DB_HOST=localhost` means the database is on my own Mac (not in the cloud). `DB_PASSWORD=localpass` is the password I'll set for the Docker PostgreSQL container — it's just a local development value with no security implications.
 
 `TEST_DB_NAME=ecommerce_test` is worth understanding. When I run the integration tests (Part 3), they need to create and then delete database tables as part of their setup and teardown. Without this separation, the tests would destroy the data I just seeded into `ecommerce`. By giving the test suite its own database (`ecommerce_test`), I can run tests as many times as I want without ever losing my simulator data. Both databases are created automatically when I first start Docker in Step 9.
 
@@ -536,6 +542,8 @@ I forgot to create the `.env` file. I run:
 ```bash
 cp .env.example .env
 ```
+
+Then open it and fill in `ENVIRONMENT=dev` and `DB_PASSWORD=localpass` (the two blank fields in the template).
 
 ### The simulation says "Order limit reached" immediately after starting
 
