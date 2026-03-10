@@ -1,28 +1,72 @@
 # platform-cdc-simulator
 
-This is the test data generator for the Enterprise Data Platform. Its job is to pretend to be a real e-commerce business by writing customer orders, payments, and shipments into a PostgreSQL database. Once the data is in the database, AWS DMS (Database Migration Service) picks it up and forwards it to the Bronze S3 (Simple Storage Service) layer, which is where the data pipeline begins.
-
-Without this simulator, I'd have no source data to flow through the pipeline. It's the starting gun.
+A realistic e-commerce OLTP (Online Transaction Processing) data generator for the Enterprise Data Platform. It writes customer orders, payments, and shipments into a PostgreSQL (Postgres) database so AWS DMS (Database Migration Service) can capture every change and forward it to the Bronze S3 (Simple Storage Service) layer. Without this simulator, there's no source data to flow through the pipeline — it's the starting gun.
 
 ---
 
-## What problem this solves
+## Contents
 
-The data pipeline starts at a PostgreSQL database that belongs to an e-commerce business. In a real company, that database has thousands of records being written every hour by the website. In my project, I control everything, so I need to generate that activity myself.
+- [What it does](#what-it-does)
+- [Data model](#data-model)
+- [How much data it creates](#how-much-data-it-creates)
+- [Prerequisites](#prerequisites)
+- [Local setup (Docker)](#local-setup-docker)
+- [Cloud setup (AWS RDS via SSM tunnel)](#cloud-setup-aws-rds-via-ssm-tunnel)
+- [All commands](#all-commands)
+- [Configuration reference](#configuration-reference)
+- [Running tests](#running-tests)
+- [Docker](#docker)
+- [Code structure](#code-structure)
+- [CI/CD](#cicd)
+- [How DMS reads this data](#how-dms-reads-this-data)
 
-The simulator does three things:
+---
 
-1. **Creates the database schema** — sets up six tables that look like a real e-commerce system.
-2. **Seeds historical data** — fills the database with two years of past orders so the pipeline has something realistic to process from day one.
-3. **Simulates live traffic** — continuously places new orders, moves orders through statuses (pending → confirmed → shipped → delivered), processes payments, and occasionally cancels or refunds orders.
+## What it does
 
-Every write the simulator makes lands in PostgreSQL's WAL (Write-Ahead Log), which is PostgreSQL's internal diary of every change. AWS DMS reads that diary and sends each change to S3 as a Parquet file. That's CDC (Change Data Capture) in action.
+The simulator does three things in sequence:
+
+1. **Schema** — creates six tables that mirror a real e-commerce system, sets `REPLICA IDENTITY FULL` on every table (required for DMS CDC), and adds `updated_at` triggers.
+2. **Seed** — fills the database with two years of historical data (customers, products, orders with realistic lifecycle distributions).
+3. **Simulate** — runs a continuous loop that places new orders, advances orders through statuses (pending → confirmed → shipped → delivered), completes payments, creates shipment records, and occasionally cancels or refunds orders.
+
+Every write lands in PostgreSQL's WAL (Write-Ahead Log), which is PostgreSQL's internal record of every change. AWS DMS reads the WAL and writes each change to S3 as a Parquet file. That's CDC (Change Data Capture) in action.
+
+---
+
+## Data model
+
+Six tables representing a European e-commerce business:
+
+```
+customers ──< orders ──< order_items >── products
+                │
+                ├──< payments
+                └──< shipments
+```
+
+| Table | Key columns |
+|---|---|
+| `customers` | customer_id, first_name, last_name, email, country, phone, signup_date |
+| `products` | product_id, name, category, brand, unit_price, stock_qty |
+| `orders` | order_id, customer_id, order_date, order_status |
+| `order_items` | order_item_id, order_id, product_id, quantity, unit_price, line_total |
+| `payments` | payment_id, order_id, method, amount, status, payment_date |
+| `shipments` | shipment_id, order_id, carrier, delivery_status, shipped_date, delivered_date |
+
+Every table also has an `updated_at` column that updates automatically on every row change via a PostgreSQL trigger.
+
+**Order lifecycle:** `pending` → `confirmed` → `processing` → `shipped` → `delivered`
+
+Terminal states (no further transitions): `delivered`, `cancelled`, `refunded`
+
+**Why `REPLICA IDENTITY FULL`?** PostgreSQL normally only writes changed columns to the WAL on an UPDATE. DMS needs the complete old row to produce a full CDC event. Setting `REPLICA IDENTITY FULL` tells PostgreSQL to write the entire old row on every change.
 
 ---
 
 ## How much data it creates
 
-The simulator respects environment-specific limits so it never creates more data than needed for that environment:
+The simulator respects per-environment limits so it never creates more data than needed:
 
 | Environment | Max orders | Seed customers | Seed products | Seed historical orders |
 |---|---|---|---|---|
@@ -30,23 +74,36 @@ The simulator respects environment-specific limits so it never creates more data
 | `staging` | 10,000 | 1,000 | 400 | 5,000 |
 | `prod` | 15,000 | 2,000 | 800 | 10,000 |
 
-Once the order limit is reached, the simulator stops creating new orders but keeps updating existing ones (status transitions, shipment tracking, refunds). This keeps the CDC stream active without growing the database indefinitely.
+Once the order limit is reached, the simulator stops creating new orders but keeps advancing existing ones (status transitions, shipments, refunds). The CDC stream stays active without the database growing indefinitely.
 
 ---
 
 ## Prerequisites
 
-- Python 3.11.8 (managed by pyenv — see setup below)
-- Docker Desktop (for the local PostgreSQL database)
-- An internet connection to install Python packages
+**For local development:**
+
+- Python 3.11.8 — managed by pyenv (see setup below)
+- Docker Desktop — for the local PostgreSQL container
+- Git
+
+**For AWS (in addition to the above):**
+
+- AWS CLI configured with SSO profiles (`dev-admin`, `staging-admin`, `prod-admin`)
+- AWS SSM (Systems Manager) Session Manager Plugin:
+  ```bash
+  brew install --cask session-manager-plugin
+  ```
+- Terraform infrastructure applied (`make apply dev` in `terraform-platform-infra-live`)
 
 ---
 
-## First-time setup
+## Local setup (Docker)
 
-**Step 1: Install pyenv** (if not already installed)
+This runs everything on your Mac with a local PostgreSQL container. No AWS account or costs involved.
 
-pyenv lets me install and switch between Python versions. The `.python-version` file in this project tells pyenv which version to use automatically.
+**Step 1: Install pyenv**
+
+pyenv manages Python versions. The `.python-version` file in this repo tells pyenv to use 3.11.8 automatically when you `cd` into the project.
 
 ```bash
 brew install pyenv
@@ -57,6 +114,8 @@ source ~/.zshrc
 pyenv install 3.11.8
 ```
 
+Verify: `python --version` should show `Python 3.11.8` inside this directory.
+
 **Step 2: Create the virtual environment**
 
 ```bash
@@ -64,7 +123,7 @@ cd platform-cdc-simulator
 make setup
 ```
 
-This creates a `.venv` folder inside the project with all the Python packages installed. The packages are isolated here — they don't affect anything else on my Mac.
+This creates a `.venv` folder with all Python packages installed. The packages are isolated — they don't affect anything else on your Mac.
 
 **Step 3: Configure the environment**
 
@@ -72,7 +131,7 @@ This creates a `.venv` folder inside the project with all the Python packages in
 cp .env.example .env
 ```
 
-The `.env` file already has the right values for local development. I don't need to change anything to get started.
+The `.env` file already has the right values for local Docker development. You don't need to change anything.
 
 **Step 4: Start the local PostgreSQL database**
 
@@ -80,378 +139,348 @@ The `.env` file already has the right values for local development. I don't need
 make docker-up
 ```
 
-This uses Docker to run a PostgreSQL database on my Mac. It's completely separate from any AWS resources — it costs nothing and I can delete it any time with `make docker-down`.
+This starts a PostgreSQL container on port 5432. It also creates two databases automatically:
+- `ecommerce` — the simulator's database
+- `ecommerce_test` — used by the integration test suite (keeps test runs isolated from simulator data)
 
-**Step 5: Create the schema, seed data, and simulate**
+Wait for the output `PostgreSQL is ready.` before continuing.
+
+**Step 5: Create the schema and seed data**
 
 ```bash
-make schema     # create the six tables
-make seed       # fill with 2 years of historical data
-make simulate   # start the live traffic loop (Ctrl+C to stop)
+make schema    # create the six tables, indexes, and triggers
+make seed      # fill with 2 years of historical data (~2,000 orders for dev)
+```
+
+**Step 6: Run the simulator**
+
+```bash
+make simulate  # starts the live traffic loop — Ctrl+C to stop
+```
+
+You'll see log output every few seconds showing new orders being placed and existing ones advancing through their lifecycle. Every write also appears in the PostgreSQL WAL.
+
+**Reset to a clean state at any time:**
+
+```bash
+make reset     # drops all tables, recreates schema, reseeds — destroys all data
 ```
 
 ---
 
-## Commands
+## Cloud setup (AWS RDS via SSM tunnel)
 
-```bash
-make help             # show all available commands
-make setup            # create .venv and install dependencies
-make lint             # check code style with ruff
-make typecheck        # check types with mypy
-make test             # run all tests (local, reads .env)
-make test-unit        # run unit tests only (no database needed)
-make test-integration # run integration tests (needs PostgreSQL)
-make schema           # create database tables (local Docker)
-make schema ENV=dev   # create tables on AWS dev RDS (password from SSM)
-make seed             # seed historical data (local Docker)
-make seed ENV=dev     # seed on AWS dev RDS (password from SSM)
-make simulate         # run the live simulation loop (local Docker)
-make simulate ENV=dev # run against AWS dev RDS (password from SSM)
-make reset            # drop all tables, recreate, reseed (destroys data)
-make docker-up        # start local PostgreSQL in Docker
-make docker-down      # stop Docker containers
-make docker-build     # build the simulator as a Docker image
-make clean            # remove .venv and cache files
-```
+RDS lives in private subnets with no internet route. To connect from your Mac, you open an SSM (Systems Manager) port-forwarding session through the bastion EC2 (Elastic Compute Cloud) instance Terraform creates. No SSH keys and no open firewall ports are needed — the connection goes entirely through AWS's private network.
 
-Replace `ENV=dev` with `ENV=staging` or `ENV=prod` to target other AWS environments. All three use the same pattern: password fetched from SSM, tunnel on `localhost:5433`.
+**Before starting, make sure:**
 
----
-
-## Running against AWS RDS
-
-RDS lives in private subnets with no internet route. To connect from my Mac I use AWS SSM (Systems Manager) Session Manager port forwarding through a bastion EC2 instance. No SSH keys and no open firewall ports are needed.
-
-**Prerequisites:**
-
-- Infrastructure applied: `make apply dev` (or staging/prod) in `terraform-platform-infra-live`
-- AWS SSM Session Manager Plugin installed on my Mac:
-  ```bash
-  brew install --cask session-manager-plugin
-  ```
-- AWS profile configured: `dev-admin` (or `staging-admin` / `prod-admin`)
+1. Infrastructure is applied: `make apply dev` completed in `terraform-platform-infra-live`
+2. SSM Session Manager Plugin is installed (`brew install --cask session-manager-plugin`)
+3. Your AWS SSO session is active: `aws sso login --profile dev-admin`
 
 **Step 1: Get the tunnel command from Terraform output**
 
 After `make apply dev`, Terraform prints an `ssm_tunnel_command` output. Copy it. It looks like this:
 
-```bash
-aws ssm start-session \
-  --target i-0abc123def456 \
-  --document-name AWS-StartPortForwardingSessionToRemoteHost \
-  --parameters 'host=edp-dev-source-db.xxx.eu-central-1.rds.amazonaws.com,portNumber=5432,localPortNumber=5433' \
-  --profile dev-admin
+```
+ssm_tunnel_command = "aws ssm start-session --target i-0abc123 --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters 'host=edp-dev-source-db.xxx.eu-central-1.rds.amazonaws.com,portNumber=5432,localPortNumber=5433' --profile dev-admin"
 ```
 
-**Step 2: Open the tunnel in a separate terminal**
+If you need to retrieve it again later:
 
-Paste and run the command above. Leave that terminal open. It will show `Port 5433 forwarded` when ready and must stay running while the simulator is active.
+```bash
+cd terraform-platform-infra-live/environments/dev
+terraform output ssm_tunnel_command
+```
 
-**Step 3: Run the simulator in a second terminal**
+**Step 2: Open the SSM tunnel (Terminal 1)**
+
+Paste and run the tunnel command. You'll see:
+
+```
+Starting session with SessionId: dev-admin-xxxxxxxxxx
+Port 5433 forwarded
+Waiting for connections...
+```
+
+Leave this terminal open. The tunnel must stay running while the simulator is active. If it closes, the simulator loses its connection to RDS.
+
+**Step 3: Verify the tunnel is working (optional)**
+
+In a new terminal:
+
+```bash
+psql -h localhost -p 5433 -U postgres -d ecommerce
+```
+
+If it prompts for a password, the tunnel is working. Ctrl+C to exit without entering a password.
+
+**Step 4: Run the simulator (Terminal 2)**
 
 ```bash
 cd platform-cdc-simulator
-make schema ENV=dev      # create tables on AWS RDS
-make seed   ENV=dev      # seed historical data (2 years)
-make simulate ENV=dev    # run the live traffic loop (Ctrl+C to stop)
+make schema ENV=dev     # create tables on AWS RDS
+make seed   ENV=dev     # seed historical data
+make simulate ENV=dev   # run the live traffic loop (Ctrl+C to stop)
 ```
 
-**What the Makefile does automatically when `ENV=dev`:**
+The Makefile fetches the RDS password live from AWS SSM Parameter Store — no password file is ever created on disk. It calls:
 
-1. Sets `DB_HOST=localhost` and `DB_PORT=5433` (the local end of the SSM tunnel)
-2. Calls `aws ssm get-parameter --name /edp/dev/rds/db_password --with-decryption --profile dev-admin` to fetch the password live from SSM — no password file is created on disk
-3. Exports `DB_NAME`, `DB_USER`, `ENVIRONMENT`, and all other variables inline
-4. Runs the simulator with everything set
+```bash
+aws ssm get-parameter \
+  --name /edp/dev/rds/db_password \
+  --with-decryption \
+  --query Parameter.Value \
+  --output text \
+  --profile dev-admin
+```
 
-Replace `dev` with `staging` or `prod` to target other environments. The Makefile uses the matching AWS profile (`staging-admin` / `prod-admin`) and fetches from the correct SSM path automatically.
+Then sets `DB_HOST=localhost`, `DB_PORT=5433`, and all other variables before running the simulator.
 
-The `.env` file is only used when running locally against Docker. It is never read for AWS runs.
+**Step 5: Verify data in S3 (optional)**
+
+Once DMS picks up the changes (usually within 1-2 minutes of starting the DMS task), Parquet files appear in the Bronze bucket:
+
+```bash
+aws s3 ls s3://edp-dev-{account-id}-bronze/raw/ --recursive --profile dev-admin
+```
+
+**Step 6: Stop and clean up**
+
+Stop the simulator with Ctrl+C in Terminal 2. Close the SSM tunnel in Terminal 1 with Ctrl+C. Then destroy all infrastructure:
+
+```bash
+cd terraform-platform-infra-live
+make destroy dev
+```
+
+**Switching environments:**
+
+Replace `ENV=dev` with `ENV=staging` or `ENV=prod`. The Makefile uses the matching AWS profile (`staging-admin` / `prod-admin`) and SSM path automatically.
 
 ---
 
-## The data model
+## All commands
 
-Six tables representing a European e-commerce business:
+```bash
+# Setup
+make setup              # create .venv and install all dependencies
 
+# Code quality
+make lint               # run ruff linter
+make typecheck          # run mypy type checker
+make test               # run all tests (unit + integration, reads .env)
+make test-unit          # run unit tests only (no database required)
+make test-integration   # run integration tests (requires a running PostgreSQL)
+
+# Simulator — local Docker (reads .env)
+make schema             # create tables, indexes, triggers
+make seed               # seed 2 years of historical data
+make simulate           # run the live traffic loop (Ctrl+C to stop)
+make reset              # drop + recreate + reseed (destroys all data)
+
+# Simulator — AWS RDS (SSM tunnel must be open first)
+make schema ENV=dev     # create tables on AWS dev RDS
+make seed   ENV=dev     # seed on AWS dev RDS
+make simulate ENV=dev   # run loop against AWS dev RDS
+make reset  ENV=dev     # reset AWS dev RDS (destroys all data)
+
+# Docker
+make docker-up          # start local PostgreSQL container
+make docker-down        # stop and remove containers
+make docker-logs        # tail container logs
+make docker-build       # build the simulator Docker image
+make docker-simulate    # start PostgreSQL + simulator together in Docker
+
+# Cleanup
+make clean              # remove .venv and Python cache files
 ```
-customers ──< orders ──< order_items >── products
-                 │
-                 ├──< payments
-                 │
-                 └──< shipments
+
+---
+
+## Configuration reference
+
+All configuration comes from environment variables. For local runs, these are loaded from `.env`. For AWS runs (`ENV=dev/staging/prod`), the Makefile sets them inline.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `ENVIRONMENT` | Yes | — | `dev`, `staging`, or `prod`. Controls record limits. |
+| `DB_HOST` | Yes | — | PostgreSQL hostname. `localhost` for both Docker and SSM tunnel. |
+| `DB_PORT` | No | `5432` | `5432` for Docker, `5433` for SSM tunnel (local port). |
+| `DB_NAME` | Yes | — | Database name. `ecommerce` in all environments. |
+| `DB_USER` | Yes | — | Database user. `postgres` in all environments. |
+| `DB_PASSWORD` | Yes | — | Database password. Set in `.env` for local, fetched from SSM for AWS. |
+| `TEST_DB_NAME` | No | `ecommerce_test` | Database for integration tests. Never the same as `DB_NAME`. |
+| `SEED_CUSTOMERS` | No | env default | Override seed customer count. |
+| `SEED_PRODUCTS` | No | env default | Override seed product count. |
+| `SEED_HISTORICAL_ORDERS` | No | env default | Override seed order count. |
+| `SEED_RANDOM_SEED` | No | `42` | Random seed for reproducible data generation. |
+| `SIM_TICK_INTERVAL_SECONDS` | No | `2` | Seconds between simulation ticks. |
+| `SIM_NEW_ORDERS_PER_TICK` | No | `3` | New orders placed per tick. |
+| `SIM_MAX_ORDERS` | No | env default | Override the environment order cap. |
+| `RETRY_MAX_ATTEMPTS` | No | `5` | Max DB reconnection attempts on connection loss. |
+| `RETRY_WAIT_MIN_SECONDS` | No | `1` | Minimum wait between retry attempts. |
+| `RETRY_WAIT_MAX_SECONDS` | No | `30` | Maximum wait between retry attempts. |
+
+Copy `.env.example` to `.env` and fill in your values. The real `.env` is in `.gitignore` — passwords never end up in git.
+
+---
+
+## Running tests
+
+**Unit tests (no database required):**
+
+```bash
+make test-unit
 ```
 
-```sql
-customers   (customer_id, first_name, last_name, email, country, phone, signup_date, updated_at)
-products    (product_id,  name, category, brand, unit_price, stock_qty, updated_at)
-orders      (order_id,    customer_id, order_date, order_status, updated_at)
-order_items (order_item_id, order_id, product_id, quantity, unit_price, line_total, updated_at)
-payments    (payment_id,  order_id, method, amount, status, payment_date, updated_at)
-shipments   (shipment_id, order_id, carrier, delivery_status, shipped_date, delivered_date, updated_at)
+Runs all tests that don't need a database. Tests config loading, exception hierarchy, model generation, and SQL DDL strings.
+
+**Integration tests (requires PostgreSQL):**
+
+For local Docker:
+```bash
+make docker-up
+make test
 ```
 
-**Order lifecycle:** `pending → confirmed → processing → shipped → delivered`
-Terminal states (no further changes): `delivered`, `cancelled`, `refunded`
+For AWS RDS (SSM tunnel must be open):
+```bash
+make test ENV=dev
+```
 
-**Why `REPLICA IDENTITY FULL`?** PostgreSQL normally only writes changed columns to the WAL on an UPDATE. AWS DMS needs the complete old row to produce a full CDC event. Setting `REPLICA IDENTITY FULL` on every table tells PostgreSQL to write the entire old row, which is what DMS requires.
+Integration tests use `TEST_DB_NAME` (default: `ecommerce_test`) — never `DB_NAME`. The test fixture creates a fresh schema before each test and drops it after, so tests can never corrupt your simulator data. Every integration test runs in complete isolation.
+
+**Test coverage:**
+
+| File | Type | What it tests |
+|---|---|---|
+| `test_exceptions.py` | Unit | Exception hierarchy and message preservation |
+| `test_config.py` | Unit | Domain constants, env var loading, password redaction in repr |
+| `test_models.py` | Unit | Model factories, `as_insert_tuple()`, `line_total` calculation |
+| `test_schema.py` | Unit | SQL strings contain all table names, `REPLICA IDENTITY FULL`, `CASCADE` |
+| `test_db.py` | Integration | Connect, execute, fetch, bulk insert, transaction rollback |
+
+---
+
+## Docker
+
+**Local development stack:**
+
+```bash
+make docker-up        # start PostgreSQL only (recommended for development)
+make docker-simulate  # start PostgreSQL + simulator together
+make docker-down      # stop everything
+make docker-logs      # tail logs from all containers
+```
+
+**Build and push the simulator image:**
+
+```bash
+make docker-build     # builds cdc-simulator:latest locally
+```
+
+The `Dockerfile` uses a two-stage build: stage one installs Python packages, stage two copies only what's needed into a slim final image. The container runs as a non-root user. This image can be deployed to AWS ECS (Elastic Container Service) to run the simulator in the cloud without needing a laptop connection.
+
+On merge to `main`, GitHub Actions automatically builds and pushes the image to GitHub Container Registry.
+
+---
+
+## Code structure
+
+Each file has a single, clearly defined role. Files in higher layers only import from lower layers — never sideways or upward. This one-way dependency flow means changes have predictable blast radius.
+
+```mermaid
+flowchart TD
+    subgraph infra["Infrastructure (not Python source)"]
+        direction LR
+        E[".env"] & M["Makefile"] & D["docker-compose.yml"] & DF["Dockerfile"] & CI[".github/workflows/ci.yml"]
+    end
+
+    subgraph l5["Layer 5 — Entry Point"]
+        MAIN["main.py\nparses CLI · loads config · opens DB · delegates"]
+    end
+
+    subgraph l4["Layer 4 — Business Logic"]
+        SEED["seed.py\nSeeder\n2 yrs historical data"]
+        SIM["simulate.py\nSimulator\nlive traffic loop"]
+        SCH["schema.py\nDDL SQL strings\nCREATE · DROP · REPLICA IDENTITY"]
+    end
+
+    subgraph l3["Layer 3 — Database + Models"]
+        DB["db.py\nDatabaseManager\nconnect · retry · cursor · execute · fetch"]
+        MOD["models.py\nCustomer · Product\nOrder · OrderItem\nPayment · Shipment"]
+    end
+
+    subgraph l2["Layer 2 — Configuration"]
+        CFG["config.py\nOrderStatus · PaymentMethod · Carrier · ProductCategory\nDatabaseConfig · SeedConfig · SimulationConfig · RetryConfig"]
+    end
+
+    subgraph l1["Layer 1 — Foundation"]
+        EXC["exceptions.py\nSimulatorError · ConfigurationError\nDatabaseConnectionError · SchemaError\nSeedError · SimulationError"]
+    end
+
+    E -->|load_dotenv| CFG
+    M -->|python main.py| MAIN
+    DF -->|packages| MAIN
+
+    MAIN --> SEED & SIM & SCH & DB & CFG
+
+    SEED --> DB & MOD
+    SIM  --> DB & MOD
+
+    DB  --> CFG
+    MOD --> CFG
+    CFG --> EXC
+```
+
+**What each file does:**
+
+| File | Role |
+|---|---|
+| `main.py` | CLI entry point. Parses `schema / seed / simulate / reset`, loads and validates all config before opening a DB connection, then calls the right class. The only file that touches every layer. |
+| `simulator/config.py` | Domain constants (`OrderStatus`, `PaymentMethod`, `Carrier`, etc.) and frozen config dataclasses. `ENVIRONMENT` drives record limits automatically — no hardcoded numbers to change when switching environments. |
+| `simulator/db.py` | `DatabaseManager` wraps psycopg2. Handles connect with exponential-backoff retry, a `cursor()` context manager that auto-commits on success and rolls back on any failure, and helper methods for bulk inserts and reads. |
+| `simulator/models.py` | Dataclasses for each table (`Customer`, `Product`, `Order`, `OrderItem`, `Payment`, `Shipment`). Each has a `generate()` factory using Faker and an `as_insert_tuple()` method that matches the INSERT column order. |
+| `simulator/schema.py` | Pure SQL DDL strings: CREATE TABLE, indexes, `updated_at` triggers, `REPLICA IDENTITY FULL`, and DROP TABLE. No Python logic — just SQL kept in one place. |
+| `simulator/seed.py` | `Seeder` class. Inserts customers and products first, then creates historical orders with realistic lifecycle distributions (most old orders delivered, a fraction cancelled or refunded, recent ones still in transit). Raises `SeedError` on any failure — never partial. |
+| `simulator/simulate.py` | `Simulator` class. Runs the continuous tick loop: new orders, status advances, shipment tracking, cancellations, refunds, organic customer sign-ups. `DatabaseConnectionError` triggers a reconnect; all other errors crash loudly. |
+| `simulator/exceptions.py` | Exception hierarchy rooted at `SimulatorError`. Named exceptions mean callers catch exactly what they expect and everything else crashes with context. |
+| `tests/conftest.py` | Shared pytest fixtures. The `db` fixture uses `TEST_DB_NAME` (not `DB_NAME`) and creates + drops the schema around each test, so tests never touch simulator data. |
 
 ---
 
 ## CI/CD
 
-Every push and pull request triggers the GitHub Actions workflow at `.github/workflows/ci.yml`:
+Every push and pull request triggers `.github/workflows/ci.yml`:
 
 ```
-Pull request
-    → lint (ruff)
-    → type check (mypy)
-    → unit tests (pytest, no DB)
-    → integration tests (pytest, with PostgreSQL service container)
-    → build Docker image
+Push / Pull Request
+    1. lint          ruff — code style
+    2. typecheck     mypy — type safety
+    3. unit tests    pytest (no database needed)
+    4. integration   pytest (GitHub spins up a real PostgreSQL automatically)
+    5. docker build  verifies the image builds cleanly
 
 Merge to main
-    → all of the above
-    → push Docker image to GitHub Container Registry
+    1–5 above, then:
+    6. docker push   image pushed to GitHub Container Registry
 ```
 
-The integration tests run against a real PostgreSQL database that GitHub spins up automatically inside the CI pipeline. I don't need to provision anything.
-
----
-
-## How the files depend on each other
-
-Every Python file has one clearly defined role, and those roles form layers. A file in a higher layer only imports from lower layers — never sideways into the same layer and never upward. This one-way flow makes the code predictable: if I change `exceptions.py`, every file above it might be affected. If I change `simulate.py`, only `main.py` calls it.
-
-Read the diagram top-to-bottom. Arrows (`--imports-->`) point toward the file being imported.
-
-```
-  INFRASTRUCTURE  (not Python source — these set up the environment)
-  ─────────────────────────────────────────────────────────────────────────
-  .env  ──── load_dotenv() reads ──────────────────────────►  config.py
-  docker-compose.yml + docker/init.sql  ──── starts ──────►  PostgreSQL DB
-  Makefile  ──── calls "python main.py <command>" ────────►  main.py
-  Dockerfile  ──── packages ──────────────────────────────►  main.py (as container)
-  .github/workflows/ci.yml  ──── runs tests and builds ───►  all source files
-
-
-  ┌───────────────────────────────────────────────────────────────────────┐
-  │  LAYER 5 — Entry Point                                                │
-  │                                                                       │
-  │                          main.py                                      │
-  │   parses the CLI command (schema/seed/simulate/reset),                │
-  │   loads all config, opens the DB connection, delegates to the         │
-  │   right class. The only file that imports from every layer below.     │
-  └──────┬──────────────┬───────────────────────────────┬─────────────────┘
-         │              │                               │
-         ▼              ▼                               ▼
-  ┌────────────┐  ┌─────────────┐               ┌────────────┐
-  │  seed.py   │  │ simulate.py │               │ schema.py  │
-  │            │  │             │               │            │
-  │  Seeder    │  │  Simulator  │               │ CREATE and │
-  │  fills DB  │  │  live order │               │ DROP TABLE │
-  │  with 2yrs │  │  traffic    │               │ SQL strings│
-  │  of history│  │  loop       │               └────────────┘
-  └──┬──┬──────┘  └──┬──┬───────┘
-     │  │            │  │
-     │  │  both      │  │  both
-     │  │  import    │  │  import
-     │  └────────────┘  │
-     │                  │
-     ▼                  ▼
-  ┌───────────────────────────────────────────────────────────────────────┐
-  │  LAYER 3 — Database and Models                                        │
-  │                                                                       │
-  │      db.py                            models.py                      │
-  │      ──────                           ─────────                      │
-  │      DatabaseManager                  Customer · Product             │
-  │      connect, retry on failure        Order · OrderItem              │
-  │      cursor (auto commit/rollback)    Payment · Shipment             │
-  │      execute · fetch_all · fetch_one                                 │
-  │                                                                       │
-  │  (db.py and models.py do not import each other)                      │
-  └────────────────────────────┬──────────────────────────────────────────┘
-                               │  both import from
-                               ▼
-  ┌───────────────────────────────────────────────────────────────────────┐
-  │  LAYER 2 — Configuration                                              │
-  │                                                                       │
-  │                         config.py                                     │
-  │                                                                       │
-  │  Domain constants:  OrderStatus · DeliveryStatus · PaymentMethod     │
-  │                     Carrier · ProductCategory · price ranges         │
-  │  Config classes:    DatabaseConfig · SeedConfig · SimulationConfig   │
-  │                     RetryConfig · EnvironmentLimits                  │
-  │  Env helpers:       get_environment() · get_environment_limits()     │
-  └─────────────────────────────┬─────────────────────────────────────────┘
-                                │  imports ConfigurationError
-                                ▼
-  ┌───────────────────────────────────────────────────────────────────────┐
-  │  LAYER 1 — Foundation  (nothing in this project imports INTO         │
-  │            these files — they are the bedrock everything rests on)   │
-  │                                                                       │
-  │   exceptions.py                        schema.py                     │
-  │   ────────────                         ─────────                     │
-  │   SimulatorError (base class)          CREATE TABLE SQL              │
-  │   ConfigurationError                   DROP TABLE SQL                │
-  │   DatabaseConnectionError              indexes and triggers          │
-  │   SchemaError · SeedError              REPLICA IDENTITY FULL         │
-  │   SimulationError                      (pure SQL strings,            │
-  │                                         no Python imports)           │
-  └───────────────────────────────────────────────────────────────────────┘
-
-
-  TESTS
-  ─────────────────────────────────────────────────────────────────────────
-
-  tests/conftest.py  imports  config.py · db.py · schema.py
-         │
-         └── provides shared fixtures to all 5 test files:
-                  │
-                  ├── test_config.py      unit  — tests config.py
-                  ├── test_exceptions.py  unit  — tests exceptions.py
-                  ├── test_models.py      unit  — tests models.py
-                  ├── test_schema.py      unit  — tests schema.py
-                  └── test_db.py          integration — tests db.py
-                                          (needs live PostgreSQL)
-```
-
-**Key things to notice:**
-
-- `exceptions.py` and `schema.py` have no arrows pointing out of them toward other project files. Every other file depends on them, not the reverse. Changing these two files has the widest blast radius.
-- `seed.py` and `simulate.py` are side-by-side in Layer 4 but they never import each other. Seeding and simulating are completely independent operations.
-- `main.py` is the only file that imports from every other layer. If you want to understand the full picture of how a command runs, `main.py` is the place to start.
-- The test files are outside the main dependency chain. They import the modules they test but the source code never imports from tests.
-
-**Practical rule:** if I want to understand how `seed.py` works, I read just three other files: `config.py` (for constants), `db.py` (for database access), and `models.py` (for data generation). Nothing else.
-
----
-
-## What each file does
-
-### Configuration and entry point
-
-**`.python-version`**
-Contains just `3.11.8`. pyenv reads this file when I `cd` into the project and automatically uses Python 3.11.8. Anyone who clones this repo gets the same Python version without any manual steps.
-
-**`pyproject.toml`**
-Configuration for three tools in one file: ruff (linting), mypy (type checking), and pytest (testing). Centralising tool config here means I don't have scattered config files like `.flake8`, `mypy.ini`, and `pytest.ini` all over the place.
-
-**`requirements.txt`**
-The Python packages the simulator needs to run: psycopg2 (connects to PostgreSQL), faker (generates realistic fake data), python-dotenv (reads `.env` files), and tenacity (handles retries).
-
-**`requirements-dev.txt`**
-Extra packages only needed during development: ruff (linting), mypy (type checking), pytest (testing), and type stubs. These are not installed in the Docker image — they're only for local development and CI.
-
-**`.env.example`**
-A template showing every environment variable the simulator reads. I copy this to `.env` and fill in my values. The real `.env` is in `.gitignore` so passwords never end up in git.
-
-**`Makefile`**
-A shortcut file. Instead of remembering long commands like `python main.py simulate` or `.venv/bin/pytest tests/ -m "not integration"`, I run `make simulate` or `make test-unit`. The Makefile also handles virtual environment paths so commands work correctly regardless of whether the venv is activated.
-
-The Makefile has an `ENV` selector (default: `local`). When `ENV=dev`, `ENV=staging`, or `ENV=prod` is passed, it fetches the database password live from AWS SSM (Systems Manager) Parameter Store using the matching AWS profile (`dev-admin`, `staging-admin`, or `prod-admin`). No password file is created or stored on disk for AWS environments.
-
-**`main.py`**
-The CLI (Command Line Interface) entry point. It parses the command (`schema`, `seed`, `simulate`, `reset`), loads all configuration from environment variables, raises a clear error if anything is missing, then calls the right function. It also sets up logging so every log line shows the time, level, and which module it came from.
-
-**`Dockerfile`**
-Packages the simulator as a Docker container image. Uses a two-stage build: stage one installs packages, stage two copies only the installed packages and source code (not the build tools). The final image runs as a non-root user for security. This image can be deployed to AWS ECS (Elastic Container Service) if I ever want to run the simulator in the cloud instead of on my laptop.
-
-**`docker/init.sql`**
-A SQL script that runs automatically the first time the PostgreSQL container starts. It creates two completely separate databases: `ecommerce` (for the simulator's data) and `ecommerce_test` (for the integration test suite). Keeping them separate means the test suite can never wipe my simulator's data, no matter how many times I run the tests.
-
-**`docker-compose.yml`**
-Defines the local development stack: a PostgreSQL container and optionally the simulator container. Running `make docker-up` starts just the PostgreSQL container. Running `make docker-simulate` starts both together. The PostgreSQL container mounts `docker/init.sql` so both databases are created on first startup — no manual database creation needed.
-
-### The `simulator/` package
-
-**`simulator/__init__.py`**
-An empty file that tells Python "this folder is a package". Without it, Python wouldn't know to treat `simulator/` as importable code.
-
-**`simulator/exceptions.py`**
-Defines the custom exception types used throughout the project. Having named exceptions instead of generic `Exception` means:
-- I can catch exactly the errors I expect and let everything else crash loudly.
-- Error messages always say what kind of failure happened.
-- Tests can verify that specific failure modes raise specific exceptions.
-
-The hierarchy is: `SimulatorError` (base) → `ConfigurationError`, `DatabaseConnectionError`, `SchemaError`, `SeedError`, `SimulationError`.
-
-**`simulator/config.py`**
-Two things in one file: constants and configuration.
-
-Constants are things that never change, like `OrderStatus.PENDING = "pending"` or the list of product categories with their price ranges. I define these as class attributes with `Final` type annotations so the IDE catches any accidental reassignment.
-
-Configuration is loaded from environment variables at startup. I use frozen dataclasses (`DatabaseConfig`, `SeedConfig`, `SimulationConfig`, `RetryConfig`) so the config object is immutable once created. The `ENVIRONMENT` variable (`dev`, `staging`, or `prod`) automatically sets the record limits — I don't need to remember to change numbers when switching environments.
-
-**`simulator/db.py`**
-The `DatabaseManager` class. It handles everything related to talking to the database:
-- Connecting with exponential backoff retry (if the database is briefly unavailable, it waits and tries again rather than crashing immediately)
-- A cursor context manager that automatically commits on success and rolls back on failure — so a failed insert never leaves the database in a half-written state
-- Helper methods for inserting multiple rows at once (`execute_many`), running single statements (`execute`), and reading data (`fetch_all`, `fetch_column`, `fetch_one`)
-
-**`simulator/schema.py`**
-All the SQL DDL (Data Definition Language) statements that create and drop the database schema. I keep the SQL here as string constants rather than scattering it through other files, so there's one place to look when I need to change a table definition. It also sets `REPLICA IDENTITY FULL` on every table and creates `updated_at` triggers so the column updates automatically on every row change.
-
-**`simulator/models.py`**
-Python dataclasses for each database table: `Customer`, `Product`, `Order`, `OrderItem`, `Payment`, `Shipment`. Each model has:
-- A `generate(fake, ...)` classmethod that creates a realistic fake instance using the Faker library
-- An `as_insert_tuple()` method that returns the values in the exact column order the INSERT statement expects
-
-This keeps the mapping between Python objects and SQL in one place instead of splitting it between the model and the code that inserts it.
-
-**`simulator/seed.py`**
-The `Seeder` class fills the database with two years of historical data before the live simulation starts. It creates customers and products first, then creates historical orders with realistic lifecycle distributions — most old orders are delivered, a realistic fraction are cancelled or refunded, and a few recent ones are still in transit.
-
-Every failure raises `SeedError` with a descriptive message. Nothing is skipped silently — a partial seed is worse than no seed because it produces misleading data downstream.
-
-**`simulator/simulate.py`**
-The `Simulator` class runs the continuous loop. Each tick:
-1. Checks if the order count is below the environment limit, then places new orders.
-2. Advances ~20% of in-progress orders by one lifecycle step (pending → confirmed, etc.).
-3. Advances shipment delivery statuses.
-4. Occasionally cancels a pending order or processes a refund.
-5. Occasionally adds a new customer.
-6. Sleeps until the next tick.
-
-Database connection errors are caught and trigger a reconnect. All other errors crash the process — a loud crash is easier to diagnose than a silent failure producing wrong data.
-
-### Tests
-
-**`tests/conftest.py`**
-Shared test fixtures. The `db` fixture reads the `TEST_DB_NAME` environment variable (defaulting to `ecommerce_test`) to decide which database to connect to. This is the key safety mechanism: because `TEST_DB_NAME` points at `ecommerce_test` rather than `ecommerce`, the fixture's teardown — which drops all tables after each test — can never touch the simulator's database. The `db` fixture creates a fresh schema before each integration test and drops it after, so every test starts with a clean slate in complete isolation.
-
-**`tests/test_exceptions.py`**
-Verifies the exception hierarchy. Every custom exception must inherit from `SimulatorError`, messages must be preserved, and exceptions must be raiseable and catchable.
-
-**`tests/test_config.py`**
-Verifies the domain constants and config classes. Tests that lifecycle lists are in the right order, that per-environment limits increase from dev to prod, that passwords never appear in `repr()` output, and that missing environment variables raise `ConfigurationError` with a clear message.
-
-**`tests/test_models.py`**
-Verifies every model's `generate()` factory and `as_insert_tuple()` method. The most important test: `line_total` must exactly equal `quantity * unit_price` for every `OrderItem`, no rounding surprises.
-
-**`tests/test_schema.py`**
-Verifies the SQL strings without executing them. Checks that all six table names appear in the CREATE and DROP statements, that `REPLICA IDENTITY FULL` is set on every table, and that `CASCADE` is present in the DROP statement.
-
-**`tests/test_db.py`**
-Integration tests for `DatabaseManager`. These run against a real PostgreSQL database (the CI workflow provides one automatically). They verify connection, execute, fetch, bulk insert, and — most importantly — that a failed transaction actually rolls back and leaves the database unchanged.
-
-### CI/CD
-
-**`.github/workflows/ci.yml`**
-The GitHub Actions pipeline that runs on every push and pull request. It runs four jobs in sequence: lint and type check (no DB needed), unit tests (no DB needed), integration tests (with a real PostgreSQL), and Docker image build. On merge to `main`, the Docker image is also pushed to GitHub Container Registry. This means I can always pull the latest tested image with one command.
+The integration tests run against a real PostgreSQL service container that GitHub provisions automatically inside the CI pipeline. No manual provisioning needed.
 
 ---
 
 ## How DMS reads this data
 
-AWS DMS connects to PostgreSQL as a replication client and subscribes to the WAL stream. For each change the simulator makes, DMS writes a Parquet file to the Bronze S3 bucket:
+AWS DMS connects to PostgreSQL as a replication client and subscribes to the WAL stream. For each change the simulator writes, DMS produces a Parquet file in the Bronze S3 bucket partitioned by date:
 
 ```
-s3://edp-dev-{account-id}-bronze/
+s3://edp-dev-{account-id}-bronze/raw/
 └── customers/
-    └── year=2024/month=01/
-        └── LOAD00000001.parquet       ← full table snapshot on first run
-        └── 20240115-102301-0001.parquet  ← CDC events after that
+    └── 20240115/
+        ├── LOAD00000001.parquet        ← full table snapshot (first run)
+        └── 20240115-102301-0001.parquet ← CDC events (inserts, updates, deletes)
 ```
 
-The Bronze layer is append-only. Glue (in `platform-glue-jobs`) reads these files and resolves the CDC operations (INSERT/UPDATE/DELETE) into a clean Silver layer.
+The Bronze layer is append-only. The Glue PySpark jobs in `platform-glue-jobs` read these files, resolve the CDC operations, and write a clean deduplicated Silver layer.
