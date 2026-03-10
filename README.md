@@ -119,32 +119,54 @@ Replace `ENV=dev` with `ENV=staging` or `ENV=prod` to target other AWS environme
 
 ---
 
-## Switching from local to AWS
+## Running against AWS RDS
 
-I don't edit `.env` to switch environments. I pass `ENV=dev`, `ENV=staging`, or `ENV=prod` to any Makefile command:
+RDS lives in private subnets with no internet route. To connect from my Mac I use AWS SSM (Systems Manager) Session Manager port forwarding through a bastion EC2 instance. No SSH keys and no open firewall ports are needed.
+
+**Prerequisites:**
+
+- Infrastructure applied: `make apply dev` (or staging/prod) in `terraform-platform-infra-live`
+- AWS SSM Session Manager Plugin installed on my Mac:
+  ```bash
+  brew install --cask session-manager-plugin
+  ```
+- AWS profile configured: `dev-admin` (or `staging-admin` / `prod-admin`)
+
+**Step 1: Get the tunnel command from Terraform output**
+
+After `make apply dev`, Terraform prints an `ssm_tunnel_command` output. Copy it. It looks like this:
 
 ```bash
-make schema ENV=dev      # create tables on AWS dev RDS
-make seed   ENV=dev      # seed historical data
-make simulate ENV=dev    # run the live loop
+aws ssm start-session \
+  --target i-0abc123def456 \
+  --document-name AWS-StartPortForwardingSessionToRemoteHost \
+  --parameters 'host=edp-dev-source-db.xxx.eu-central-1.rds.amazonaws.com,portNumber=5432,localPortNumber=5433' \
+  --profile dev-admin
 ```
 
-The Makefile has an environment selector. When `ENV` is anything other than `local`, it fetches the RDS password live from AWS SSM (Systems Manager) Parameter Store instead of reading `.env`. Terraform stores the password in SSM at `/edp/{env}/rds/db_password` when the infrastructure is applied, so no password file ever needs to exist on my Mac.
+**Step 2: Open the tunnel in a separate terminal**
+
+Paste and run the command above. Leave that terminal open. It will show `Port 5433 forwarded` when ready and must stay running while the simulator is active.
+
+**Step 3: Run the simulator in a second terminal**
+
+```bash
+cd platform-cdc-simulator
+make schema ENV=dev      # create tables on AWS RDS
+make seed   ENV=dev      # seed historical data (2 years)
+make simulate ENV=dev    # run the live traffic loop (Ctrl+C to stop)
+```
 
 **What the Makefile does automatically when `ENV=dev`:**
 
 1. Sets `DB_HOST=localhost` and `DB_PORT=5433` (the local end of the SSM tunnel)
-2. Calls `aws ssm get-parameter --name /edp/dev/rds/db_password --with-decryption --profile dev-admin` to fetch the password
-3. Exports all other variables (`DB_NAME`, `DB_USER`, etc.) inline
-4. Runs the simulator with all those values set as environment variables
+2. Calls `aws ssm get-parameter --name /edp/dev/rds/db_password --with-decryption --profile dev-admin` to fetch the password live from SSM — no password file is created on disk
+3. Exports `DB_NAME`, `DB_USER`, `ENVIRONMENT`, and all other variables inline
+4. Runs the simulator with everything set
 
-**Prerequisites for AWS environments:**
+Replace `dev` with `staging` or `prod` to target other environments. The Makefile uses the matching AWS profile (`staging-admin` / `prod-admin`) and fetches from the correct SSM path automatically.
 
-- The SSM tunnel must be open in a separate terminal (see `cloud_setup_guide.md`)
-- AWS profile `dev-admin` (or `staging-admin` / `prod-admin`) must be configured
-- The infrastructure must have been applied with `make apply dev` so the SSM parameter exists
-
-The `.env` file is only used when running locally against Docker. It is never touched for AWS runs.
+The `.env` file is only used when running locally against Docker. It is never read for AWS runs.
 
 ---
 
