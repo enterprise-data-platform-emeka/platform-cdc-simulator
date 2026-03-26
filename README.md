@@ -1,5 +1,9 @@
 # platform-cdc-simulator
 
+This repository is part of the [Enterprise Data Platform](https://github.com/enterprise-data-platform-emeka/platform-docs). For the full project overview, architecture diagram, and build order, start there.
+
+---
+
 A realistic e-commerce OLTP (Online Transaction Processing) data generator for the Enterprise Data Platform. It writes customer orders, payments, and shipments into a PostgreSQL (Postgres) database so AWS DMS (Database Migration Service) can capture every change and forward it to the Bronze S3 (Simple Storage Service) layer. Without this simulator, there's no source data to flow through the pipeline — it's the starting gun.
 
 ---
