@@ -35,7 +35,7 @@ def dev_limits() -> EnvironmentLimits:
 
 @pytest.fixture(scope="session")
 def retry_config() -> RetryConfig:
-    """Fast retry config for tests — don't wait 30 seconds between attempts."""
+    """Fast retry config for tests. Don't wait 30 seconds between attempts."""
     return RetryConfig(max_attempts=3, wait_min_seconds=0.1, wait_max_seconds=1.0)
 
 

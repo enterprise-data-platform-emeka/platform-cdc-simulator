@@ -1,7 +1,7 @@
 """
 Tests for configuration classes and domain constants.
 
-These are pure unit tests — no database, no network, no file I/O.
+These are pure unit tests: no database, no network, no file I/O.
 They verify that:
 - Domain constants are self-consistent (e.g. TERMINAL and LIFECYCLE agree).
 - Per-environment limits have correct values and correct ordering.
@@ -231,7 +231,7 @@ class TestDatabaseConfig:
         assert "***" in repr(cfg)
 
     def test_dsn_contains_password(self):
-        """dsn() is used internally for the connection — it must include the password."""
+        """dsn() is used internally for the connection. It must include the password."""
         with patch.dict(os.environ, self._env()):
             cfg = DatabaseConfig.from_env()
         assert "supersecret" in cfg.dsn()

@@ -67,7 +67,7 @@ class Seeder:
         """
         Seed all tables in order.
 
-        Raises SeedError on any failure. A partial seed is not left behind —
+        Raises SeedError on any failure. A partial seed is not left behind:
         either the full seed succeeds or the caller should reset and retry.
         """
         logger.info(
@@ -239,7 +239,7 @@ class Seeder:
         Insert a single order and return its generated order_id.
 
         Raises psycopg2.Error on failure (caller wraps in SeedError).
-        Never returns None — a failed INSERT raises rather than returning silently.
+        Never returns None. A failed INSERT raises rather than returning silently.
         """
         row = self._db.fetch_one(
             "INSERT INTO orders (customer_id, order_date, order_status) "

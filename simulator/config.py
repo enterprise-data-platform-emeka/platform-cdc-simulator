@@ -129,7 +129,7 @@ class OrderStatus:
     # Defines the lifecycle order. An order can only advance forward (or cancel/refund).
     LIFECYCLE: Final = [PENDING, CONFIRMED, PROCESSING, SHIPPED, DELIVERED]
 
-    # Statuses that are terminal — no further transitions are valid.
+    # Statuses that are terminal. No further transitions are valid.
     TERMINAL: Final = frozenset([DELIVERED, CANCELLED, REFUNDED])
 
 
@@ -281,7 +281,7 @@ class SeedConfig:
         Load seed config from env vars, falling back to per-environment defaults.
 
         This means dev automatically seeds 500 customers, staging seeds 1000,
-        and prod seeds 2000 — without you having to remember to change the values.
+        and prod seeds 2000, without you having to remember to change the values.
         """
         return cls(
             num_customers=int(os.getenv("SEED_CUSTOMERS", str(limits.seed_customers))),

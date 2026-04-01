@@ -4,7 +4,7 @@ This repository is part of the [Enterprise Data Platform](https://github.com/ent
 
 ---
 
-A realistic e-commerce OLTP (Online Transaction Processing) data generator for the Enterprise Data Platform. It writes customer orders, payments, and shipments into a PostgreSQL (Postgres) database so AWS DMS (Database Migration Service) can capture every change and forward it to the Bronze S3 (Simple Storage Service) layer. Without this simulator, there's no source data to flow through the pipeline — it's the starting gun.
+A realistic e-commerce OLTP (Online Transaction Processing) data generator for the Enterprise Data Platform. It writes customer orders, payments, and shipments into a PostgreSQL (Postgres) database so AWS DMS (Database Migration Service) can capture every change and forward it to the Bronze S3 (Simple Storage Service) layer. Without this simulator, there's no source data to flow through the pipeline. It's the starting gun.
 
 ---
 
@@ -30,9 +30,9 @@ A realistic e-commerce OLTP (Online Transaction Processing) data generator for t
 
 The simulator does three things in sequence:
 
-1. **Schema** — creates six tables that mirror a real e-commerce system, sets `REPLICA IDENTITY FULL` on every table (required for DMS CDC), and adds `updated_at` triggers.
-2. **Seed** — fills the database with two years of historical data (customers, products, orders with realistic lifecycle distributions).
-3. **Simulate** — runs a continuous loop that places new orders, advances orders through statuses (pending → confirmed → shipped → delivered), completes payments, creates shipment records, and occasionally cancels or refunds orders.
+1. **Schema**: creates six tables that mirror a real e-commerce system, sets `REPLICA IDENTITY FULL` on every table (required for DMS CDC), and adds `updated_at` triggers.
+2. **Seed**: fills the database with two years of historical data (customers, products, orders with realistic lifecycle distributions).
+3. **Simulate**: runs a continuous loop that places new orders, advances orders through statuses (pending → confirmed → shipped → delivered), completes payments, creates shipment records, and occasionally cancels or refunds orders.
 
 Every write lands in PostgreSQL's WAL (Write-Ahead Log), which is PostgreSQL's internal record of every change. AWS DMS reads the WAL and writes each change to S3 as a Parquet file. That's CDC (Change Data Capture) in action.
 
@@ -86,8 +86,8 @@ Once the order limit is reached, the simulator stops creating new orders but kee
 
 **For local development:**
 
-- Python 3.11.8 — managed by pyenv (see setup below)
-- Docker Desktop — for the local PostgreSQL container
+- Python 3.11.8, managed by pyenv (see setup below)
+- Docker Desktop, for the local PostgreSQL container
 - Git
 
 **For AWS (in addition to the above):**
@@ -127,7 +127,7 @@ cd platform-cdc-simulator
 make setup
 ```
 
-This creates a `.venv` folder with all Python packages installed. The packages are isolated — they don't affect anything else on your Mac.
+This creates a `.venv` folder with all Python packages installed. The packages are isolated, so they don't affect anything else on your Mac.
 
 **Step 3: Configure the environment**
 
@@ -144,8 +144,8 @@ make docker-up
 ```
 
 This starts a PostgreSQL container on port 5432. It also creates two databases automatically:
-- `ecommerce` — the simulator's database
-- `ecommerce_test` — used by the integration test suite (keeps test runs isolated from simulator data)
+- `ecommerce`: the simulator's database
+- `ecommerce_test`: used by the integration test suite (keeps test runs isolated from simulator data)
 
 Wait for the output `PostgreSQL is ready.` before continuing.
 
@@ -174,7 +174,7 @@ make reset     # drops all tables, recreates schema, reseeds — destroys all da
 
 ## Cloud setup (AWS RDS via SSM tunnel)
 
-RDS lives in private subnets with no internet route. To connect from your Mac, you open an SSM (Systems Manager) port-forwarding session through the bastion EC2 (Elastic Compute Cloud) instance Terraform creates. No SSH keys and no open firewall ports are needed — the connection goes entirely through AWS's private network.
+RDS lives in private subnets with no internet route. To connect from your Mac, you open an SSM (Systems Manager) port-forwarding session through the bastion EC2 (Elastic Compute Cloud) instance Terraform creates. No SSH keys and no open firewall ports are needed. The connection goes entirely through AWS's private network.
 
 **Before starting, make sure:**
 
@@ -228,7 +228,7 @@ make seed   ENV=dev     # seed historical data
 make simulate ENV=dev   # run the live traffic loop (Ctrl+C to stop)
 ```
 
-The Makefile fetches the RDS password live from AWS SSM Parameter Store — no password file is ever created on disk. It calls:
+The Makefile fetches the RDS password live from AWS SSM Parameter Store, so no password file is ever created on disk. It calls:
 
 ```bash
 aws ssm get-parameter \
@@ -308,12 +308,12 @@ All configuration comes from environment variables. For local runs, these are lo
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `ENVIRONMENT` | Yes | — | `dev`, `staging`, or `prod`. Controls record limits. |
-| `DB_HOST` | Yes | — | PostgreSQL hostname. `localhost` for both Docker and SSM tunnel. |
+| `ENVIRONMENT` | Yes | none | `dev`, `staging`, or `prod`. Controls record limits. |
+| `DB_HOST` | Yes | none | PostgreSQL hostname. `localhost` for both Docker and SSM tunnel. |
 | `DB_PORT` | No | `5432` | `5432` for Docker, `5433` for SSM tunnel (local port). |
-| `DB_NAME` | Yes | — | Database name. `ecommerce` in all environments. |
-| `DB_USER` | Yes | — | Database user. `postgres` in all environments. |
-| `DB_PASSWORD` | Yes | — | Database password. Set in `.env` for local, fetched from SSM for AWS. |
+| `DB_NAME` | Yes | none | Database name. `ecommerce` in all environments. |
+| `DB_USER` | Yes | none | Database user. `postgres` in all environments. |
+| `DB_PASSWORD` | Yes | none | Database password. Set in `.env` for local, fetched from SSM for AWS. |
 | `TEST_DB_NAME` | No | `ecommerce_test` | Database for integration tests. Never the same as `DB_NAME`. |
 | `SEED_CUSTOMERS` | No | env default | Override seed customer count. |
 | `SEED_PRODUCTS` | No | env default | Override seed product count. |
@@ -326,7 +326,7 @@ All configuration comes from environment variables. For local runs, these are lo
 | `RETRY_WAIT_MIN_SECONDS` | No | `1` | Minimum wait between retry attempts. |
 | `RETRY_WAIT_MAX_SECONDS` | No | `30` | Maximum wait between retry attempts. |
 
-Copy `.env.example` to `.env` and fill in your values. The real `.env` is in `.gitignore` — passwords never end up in git.
+Copy `.env.example` to `.env` and fill in your values. The real `.env` is in `.gitignore`, so passwords never end up in git.
 
 ---
 
@@ -353,7 +353,7 @@ For AWS RDS (SSM tunnel must be open):
 make test ENV=dev
 ```
 
-Integration tests use `TEST_DB_NAME` (default: `ecommerce_test`) — never `DB_NAME`. The test fixture creates a fresh schema before each test and drops it after, so tests can never corrupt your simulator data. Every integration test runs in complete isolation.
+Integration tests use `TEST_DB_NAME` (default: `ecommerce_test`), never `DB_NAME`. The test fixture creates a fresh schema before each test and drops it after, so tests can never corrupt your simulator data. Every integration test runs in complete isolation.
 
 **Test coverage:**
 
@@ -392,7 +392,7 @@ On merge to `main`, GitHub Actions automatically builds and pushes the image to 
 
 ## Code structure
 
-Each file has a single, clearly defined role. Files in higher layers only import from lower layers — never sideways or upward. This one-way dependency flow means changes have predictable blast radius.
+Each file has a single, clearly defined role. Files in higher layers only import from lower layers, never sideways or upward. This one-way dependency flow means changes have predictable blast radius.
 
 ```mermaid
 flowchart TD
@@ -443,11 +443,11 @@ flowchart TD
 | File | Role |
 |---|---|
 | `main.py` | CLI entry point. Parses `schema / seed / simulate / reset`, loads and validates all config before opening a DB connection, then calls the right class. The only file that touches every layer. |
-| `simulator/config.py` | Domain constants (`OrderStatus`, `PaymentMethod`, `Carrier`, etc.) and frozen config dataclasses. `ENVIRONMENT` drives record limits automatically — no hardcoded numbers to change when switching environments. |
+| `simulator/config.py` | Domain constants (`OrderStatus`, `PaymentMethod`, `Carrier`, etc.) and frozen config dataclasses. `ENVIRONMENT` drives record limits automatically, so there are no hardcoded numbers to change when switching environments. |
 | `simulator/db.py` | `DatabaseManager` wraps psycopg2. Handles connect with exponential-backoff retry, a `cursor()` context manager that auto-commits on success and rolls back on any failure, and helper methods for bulk inserts and reads. |
 | `simulator/models.py` | Dataclasses for each table (`Customer`, `Product`, `Order`, `OrderItem`, `Payment`, `Shipment`). Each has a `generate()` factory using Faker and an `as_insert_tuple()` method that matches the INSERT column order. |
-| `simulator/schema.py` | Pure SQL DDL strings: CREATE TABLE, indexes, `updated_at` triggers, `REPLICA IDENTITY FULL`, and DROP TABLE. No Python logic — just SQL kept in one place. |
-| `simulator/seed.py` | `Seeder` class. Inserts customers and products first, then creates historical orders with realistic lifecycle distributions (most old orders delivered, a fraction cancelled or refunded, recent ones still in transit). Raises `SeedError` on any failure — never partial. |
+| `simulator/schema.py` | Pure SQL DDL strings: CREATE TABLE, indexes, `updated_at` triggers, `REPLICA IDENTITY FULL`, and DROP TABLE. No Python logic, just SQL kept in one place. |
+| `simulator/seed.py` | `Seeder` class. Inserts customers and products first, then creates historical orders with realistic lifecycle distributions (most old orders delivered, a fraction cancelled or refunded, recent ones still in transit). Raises `SeedError` on any failure. Never partial. |
 | `simulator/simulate.py` | `Simulator` class. Runs the continuous tick loop: new orders, status advances, shipment tracking, cancellations, refunds, organic customer sign-ups. `DatabaseConnectionError` triggers a reconnect; all other errors crash loudly. |
 | `simulator/exceptions.py` | Exception hierarchy rooted at `SimulatorError`. Named exceptions mean callers catch exactly what they expect and everything else crashes with context. |
 | `tests/conftest.py` | Shared pytest fixtures. The `db` fixture uses `TEST_DB_NAME` (not `DB_NAME`) and creates + drops the schema around each test, so tests never touch simulator data. |

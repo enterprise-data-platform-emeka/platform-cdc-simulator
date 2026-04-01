@@ -20,7 +20,7 @@ class SimulatorError(Exception):
     """
     Base class for all exceptions raised by this project.
 
-    Never raise this directly — always raise one of the subclasses so the
+    Never raise this directly. Always raise one of the subclasses so the
     caller knows what category of failure they are dealing with.
     """
 
@@ -37,7 +37,7 @@ class DatabaseConnectionError(SimulatorError):
     """
     Raised when the database is unreachable or the connection is dropped.
 
-    This is the one error the simulator's main loop catches and retries —
+    This is the one error the simulator's main loop catches and retries.
     everything else is treated as a programming bug and crashes the process.
     """
 

@@ -12,7 +12,7 @@ Every model has:
     as_insert_tuple() -> tuple
         Returns a tuple whose column order matches the INSERT statement for
         that table. This keeps the mapping between Python objects and SQL in
-        one place — not split between models.py and seed.py/simulate.py.
+        one place, not split between models.py and seed.py/simulate.py.
 
 Models intentionally omit auto-generated fields (primary keys, default
 timestamps) from as_insert_tuple() because PostgreSQL generates those.

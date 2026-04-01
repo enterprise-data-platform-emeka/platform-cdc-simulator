@@ -1,10 +1,10 @@
 """
-CDC Simulator — CLI entry point.
+CDC Simulator: CLI entry point.
 
 Commands:
     schema      Create all tables, indexes, triggers, and set REPLICA IDENTITY FULL.
                 Safe to run on an empty database. Fails loudly if tables already exist
-                and the schema differs — use reset to start fresh.
+                and the schema differs. Use reset to start fresh.
     seed        Populate the database with historical data. The amount of data
                 seeded depends on the ENVIRONMENT variable (dev/staging/prod).
     simulate    Start the live simulation loop. Runs until Ctrl+C.
@@ -20,7 +20,7 @@ Usage:
     python main.py simulate --log-level DEBUG
 
 Environment variables:
-    ENVIRONMENT   dev | staging | prod  (required — drives record limits)
+    ENVIRONMENT   dev | staging | prod  (required, drives record limits)
     DB_HOST       PostgreSQL hostname   (required)
     DB_NAME       Database name        (required)
     DB_USER       Database user        (required)
@@ -165,11 +165,11 @@ def main() -> int:
             elif command == "reset":
                 cmd_reset(db, seed_config)
     except SimulatorError as exc:
-        # Known failure — log the message and exit cleanly
+        # Known failure: log the message and exit cleanly
         logger.error("%s: %s", type(exc).__name__, exc)
         return 1
     except Exception as exc:
-        # Unknown failure — log with full traceback so it can be debugged
+        # Unknown failure: log with full traceback so it can be debugged
         logger.exception("Unexpected error: %s", exc)
         return 1
 

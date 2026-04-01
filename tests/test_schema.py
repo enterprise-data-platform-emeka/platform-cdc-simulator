@@ -1,7 +1,7 @@
 """
 Tests for the SQL schema module.
 
-These are pure unit tests — they verify the SQL strings are well-formed and
+These are pure unit tests. They verify the SQL strings are well-formed and
 contain what they should, without executing them against a database.
 Integration tests that actually create and drop the schema live in test_db.py.
 """
@@ -54,7 +54,7 @@ class TestReplicaIdentitySQL:
             )
 
     def test_uses_full_not_default(self):
-        """REPLICA IDENTITY DEFAULT only captures the PK — we need FULL."""
+        """REPLICA IDENTITY DEFAULT only captures the PK. We need FULL."""
         assert "REPLICA IDENTITY FULL" in SET_REPLICA_IDENTITY_SQL
         assert "REPLICA IDENTITY DEFAULT" not in SET_REPLICA_IDENTITY_SQL
 
@@ -77,7 +77,7 @@ class TestDropTablesSQL:
 
 class TestStatementCollections:
     def test_all_create_statements_is_tuple(self):
-        """Tuple enforces ordered execution — dict or set would not."""
+        """Tuple enforces ordered execution. A dict or set would not."""
         assert isinstance(ALL_CREATE_STATEMENTS, tuple)
 
     def test_all_drop_statements_is_tuple(self):

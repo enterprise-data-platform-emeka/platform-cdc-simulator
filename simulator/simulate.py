@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 _ADVANCE_RATE: float = 0.20
 _CANCEL_RATE_PER_TICK: float = 0.01
 _REFUND_RATE_PER_TICK: float = 0.005
-# Refresh the cached order count every N ticks (not every tick — unnecessary DB load)
+# Refresh the cached order count every N ticks (not every tick, unnecessary DB load)
 _ORDER_COUNT_REFRESH_INTERVAL: int = 50
 
 
@@ -87,7 +87,7 @@ class Simulator:
         Start the simulation loop.
 
         Handles DatabaseConnectionError gracefully (reconnects and continues).
-        All other exceptions crash the process — this is intentional.
+        All other exceptions crash the process. This is intentional.
         Logs a stats summary every 10 ticks.
         """
         logger.info(
@@ -180,7 +180,7 @@ class Simulator:
         immediately attach a payment.
 
         Raises SimulationError if required data (customers, products) is
-        missing — this means the database was not seeded before simulation.
+        missing, which means the database was not seeded before simulation.
         """
         customer_ids = self._db.fetch_column(
             "SELECT customer_id FROM customers ORDER BY random() LIMIT 50"
@@ -400,7 +400,7 @@ class Simulator:
             "ORDER BY random() LIMIT 1"
         )
         if row is None:
-            return  # No pending orders right now — this is fine, not an error
+            return  # No pending orders right now. This is fine, not an error.
         order_id = row[0]
 
         self._db.execute(
@@ -420,7 +420,7 @@ class Simulator:
             "ORDER BY random() LIMIT 1"
         )
         if row is None:
-            return  # No delivered orders yet — fine
+            return  # No delivered orders yet. Fine.
         order_id = row[0]
 
         self._db.execute(
@@ -440,10 +440,10 @@ class Simulator:
     # ── Customer growth ───────────────────────────────────────────────────────
 
     def _add_new_customer(self) -> None:
-        """Insert a new customer — simulates organic sign-ups."""
+        """Insert a new customer. Simulates organic sign-ups."""
         customer = Customer.generate(self._fake)
         # ON CONFLICT DO NOTHING: email must be unique. A collision (two fake
-        # customers generating the same email) is not an error — just skip it.
+        # customers generating the same email) is not an error. Just skip it.
         rows_affected = self._db.execute(
             "INSERT INTO customers "
             "(first_name, last_name, email, country, phone, signup_date) "

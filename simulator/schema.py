@@ -5,7 +5,7 @@ Design decisions:
 - REPLICA IDENTITY FULL is set on every table so that AWS DMS captures the
   complete before-image on every UPDATE and DELETE, not just the primary key.
   Without this, the WAL entry for an UPDATE only contains changed columns plus
-  the PK — DMS cannot tell what the old values were for unchanged columns.
+  the PK. DMS cannot tell what the old values were for unchanged columns.
 - updated_at columns use DEFAULT now() and are updated via trigger so application
   code does not need to set them explicitly.
 - All foreign keys have indexes to avoid sequential scans on joins.
@@ -98,7 +98,7 @@ CREATE INDEX IF NOT EXISTS idx_shipments_order_id        ON shipments(order_id);
 CREATE INDEX IF NOT EXISTS idx_shipments_delivery_status ON shipments(delivery_status);
 """
 
-# updated_at triggers — one per table
+# updated_at triggers, one per table
 CREATE_TRIGGERS_SQL: str = """
 DO $$ DECLARE t TEXT;
 BEGIN
