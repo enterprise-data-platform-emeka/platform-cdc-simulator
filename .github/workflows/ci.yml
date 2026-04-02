@@ -115,8 +115,9 @@ jobs:
         run: pytest tests/ -m integration -v
 
   # ── Docker build ────────────────────────────────────────────────────────────
-  # Verifies the Dockerfile builds successfully on every push.
-  # On push to main, also pushes the image to GitHub Container Registry (GHCR).
+  # Verifies the Dockerfile builds successfully on every push and pull request.
+  # Never pushes in CI — pushing is handled by deploy.yml after CI passes on main.
+  # This separation keeps CI fast and ensures only validated images are promoted.
   docker:
     name: Build Docker image
     runs-on: ubuntu-latest
@@ -128,24 +129,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GitHub Container Registry
-        # Only log in on push to main — pull requests from forks do not have
-        # access to secrets and should not push images.
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Build image
         uses: docker/build-push-action@v5
         with:
           context: .
-          # Push only on merge to main. Pull requests only build (no push).
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
+          push: false
+          tags: ghcr.io/${{ github.repository }}:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
