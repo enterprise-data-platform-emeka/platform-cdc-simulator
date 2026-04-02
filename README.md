@@ -456,22 +456,33 @@ flowchart TD
 
 ## CI/CD
 
-Every push and pull request triggers `.github/workflows/ci.yml`:
+CI skips runs triggered by README or `.env.example` changes. Only source code, configuration, and Dockerfile changes trigger the pipeline.
 
-```
-Push / Pull Request
-    1. lint          ruff — code style
-    2. typecheck     mypy — type safety
-    3. unit tests    pytest (no database needed)
-    4. integration   pytest (GitHub spins up a real PostgreSQL automatically)
-    5. docker build  verifies the image builds cleanly
+### On every pull request and push to main
 
-Merge to main
-    1–5 above, then:
-    6. docker push   image pushed to GitHub Container Registry
-```
+Four jobs run in two waves:
 
-The integration tests run against a real PostgreSQL service container that GitHub provisions automatically inside the CI pipeline. No manual provisioning needed.
+**Wave 1 (parallel):**
+
+| Job | What it checks |
+|---|---|
+| Lint and type check | ruff (style) + mypy (types) on `simulator/` and `main.py` |
+| Unit tests | pytest unit tests with coverage report (no database needed) |
+
+**Wave 2 (only if wave 1 passes, parallel):**
+
+| Job | What it checks |
+|---|---|
+| Integration tests | pytest integration tests against a real PostgreSQL service container that GitHub provisions automatically |
+| Docker build | Verifies the Dockerfile builds cleanly (no push in CI) |
+
+### On merge to main
+
+The deploy workflow triggers automatically after CI passes. It builds the Docker image and pushes it to GitHub Container Registry (GHCR) tagged as `dev` and `dev-{sha}`. No AWS credentials are needed, it authenticates using the built-in `GITHUB_TOKEN`.
+
+### Promotion to staging and prod
+
+Trigger the Deploy workflow manually from GitHub Actions, choose the target environment. The image is rebuilt and pushed with the matching environment tag (`staging`, `prod`). The `prod` push also updates the `latest` tag. GitHub Environment protection rules require reviewer approval for staging and prod before the job runs.
 
 ---
 

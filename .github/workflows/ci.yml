@@ -3,8 +3,14 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '.env.example'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '.env.example'
 
 jobs:
   # ── Lint and type check ─────────────────────────────────────────────────────
