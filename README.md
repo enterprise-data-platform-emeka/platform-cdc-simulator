@@ -488,6 +488,39 @@ Trigger the Deploy workflow manually from GitHub Actions, choose the target envi
 
 ---
 
+## How the tests work
+
+Most test suites load sample data from CSV files. I didn't do that here, and it's worth explaining why.
+
+A CSV is static. The moment the database schema changes, the CSV goes out of date and the tests start lying to you — they pass even when the real code would fail. Instead, the tests create the actual PostgreSQL schema from scratch before each test and destroy it afterwards. The schema itself becomes the test environment.
+
+There are two layers of tests.
+
+**Unit tests** check individual pieces of logic in isolation. They run entirely in Python with no database, no Docker, and no AWS. If a test checks that the `Customer` model generates a valid insert tuple, it just calls the Python function and inspects the result. These run in under a second.
+
+**Integration tests** check that the application works against a real PostgreSQL database. GitHub Actions spins up a PostgreSQL service container automatically alongside the CI runner. The test creates the full schema, runs the application code, checks the result, then drops everything. Each test starts with a completely clean slate.
+
+```mermaid
+flowchart TD
+    A[Push to GitHub] --> B[Wave 1: runs in parallel]
+    B --> C[Lint and type check\nruff + mypy]
+    B --> D[Unit tests\nPure Python, no database needed]
+    C --> E{Both pass?}
+    D --> E
+    E -->|No| F[Pipeline stops here]
+    E -->|Yes| G[Wave 2: runs in parallel]
+    G --> H[Integration tests\nGitHub spins up a real\nPostgreSQL container automatically]
+    G --> I[Docker build\nVerifies image builds cleanly]
+    H --> J{Both pass?}
+    I --> J
+    J -->|Yes| K[Deploy workflow triggers\nImage pushed to GHCR]
+    J -->|No| L[Pipeline stops here]
+```
+
+The integration tests connect to a separate database called `ecommerce_test`, never the main `ecommerce` database. Running the full test suite can never touch or corrupt real simulator data.
+
+---
+
 ## How DMS reads this data
 
 AWS DMS connects to PostgreSQL as a replication client and subscribes to the WAL stream. For each change the simulator writes, DMS produces a Parquet file in the Bronze S3 bucket partitioned by date:
