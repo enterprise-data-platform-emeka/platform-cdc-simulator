@@ -2,6 +2,8 @@
 
 This repository is part of the [Enterprise Data Platform](https://github.com/enterprise-data-platform-emeka/platform-docs). For the full project overview, architecture diagram, and build order, start there.
 
+**Previous:** [terraform-platform-infra-live](https://github.com/enterprise-data-platform-emeka/terraform-platform-infra-live): that repo provisioned the VPC, RDS PostgreSQL, DMS replication task, and S3 buckets that the simulator writes into.
+
 ---
 
 A realistic e-commerce OLTP (Online Transaction Processing) data generator for the Enterprise Data Platform. It writes customer orders, payments, and shipments into a PostgreSQL (Postgres) database so AWS DMS (Database Migration Service) can capture every change and forward it to the Bronze S3 (Simple Storage Service) layer. Without this simulator, there's no source data to flow through the pipeline. It's the starting gun.
@@ -499,3 +501,7 @@ s3://edp-dev-{account-id}-bronze/raw/
 ```
 
 The Bronze layer is append-only. The Glue PySpark jobs in `platform-glue-jobs` read these files, resolve the CDC operations, and write a clean deduplicated Silver layer.
+
+---
+
+**Next:** [platform-glue-jobs](https://github.com/enterprise-data-platform-emeka/platform-glue-jobs): with Bronze CDC files landing in S3, the six PySpark jobs reconcile those records into a clean Silver star schema, discarding duplicates and quarantining invalid data.
