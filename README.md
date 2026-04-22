@@ -400,14 +400,14 @@ Each file has a single, clearly defined role. Files in higher layers only import
 flowchart TD
     subgraph infra["Infrastructure (not Python source)"]
         direction LR
-        E[".env"] & M["Makefile"] & D["docker-compose.yml"] & DF["Dockerfile"] & CI[".github/workflows/ci.yml"]
+        E[".env\nenv vars"] & M["Makefile\nshortcuts"] & D["docker-compose.yml\nlocal Postgres"] & DF["Dockerfile\ncontainer image"] & CI[".github/workflows/ci.yml\nCI pipeline"]
     end
 
     subgraph l5["Layer 5 — Entry Point"]
         MAIN["main.py\nparses CLI · loads config · opens DB · delegates"]
     end
 
-    subgraph l4["Layer 4 — Business Logic"]
+    subgraph l4["Layer 4 — Business Logic\n(imports from layers below only)"]
         SEED["seed.py\nSeeder\n2 yrs historical data"]
         SIM["simulate.py\nSimulator\nlive traffic loop"]
         SCH["schema.py\nDDL SQL strings\nCREATE · DROP · REPLICA IDENTITY"]
@@ -422,22 +422,24 @@ flowchart TD
         CFG["config.py\nOrderStatus · PaymentMethod · Carrier · ProductCategory\nDatabaseConfig · SeedConfig · SimulationConfig · RetryConfig"]
     end
 
-    subgraph l1["Layer 1 — Foundation"]
+    subgraph l1["Layer 1 — Foundation\n(no imports from above)"]
         EXC["exceptions.py\nSimulatorError · ConfigurationError\nDatabaseConnectionError · SchemaError\nSeedError · SimulationError"]
     end
 
-    E -->|load_dotenv| CFG
-    M -->|python main.py| MAIN
-    DF -->|packages| MAIN
+    E -->|load_dotenv reads env vars| CFG
+    M -->|runs python main.py| MAIN
+    DF -->|installs packages for| MAIN
 
-    MAIN --> SEED & SIM & SCH & DB & CFG
+    MAIN -->|delegates to| SEED & SIM & SCH & DB & CFG
 
-    SEED --> DB & MOD
-    SIM  --> DB & MOD
+    SEED -->|writes rows via| DB
+    SEED -->|creates row objects via| MOD
+    SIM  -->|writes rows via| DB
+    SIM  -->|creates row objects via| MOD
 
-    DB  --> CFG
-    MOD --> CFG
-    CFG --> EXC
+    DB  -->|reads connection config from| CFG
+    MOD -->|reads domain constants from| CFG
+    CFG -->|raises on bad config| EXC
 ```
 
 **What each file does:**
@@ -502,19 +504,19 @@ There are two layers of tests.
 
 ```mermaid
 flowchart TD
-    A[Push to GitHub] --> B[Wave 1: runs in parallel]
+    A[Push to GitHub] -->|triggers CI| B[Wave 1: fast checks run in parallel\nno database needed]
     B --> C[Lint and type check\nruff + mypy]
     B --> D[Unit tests\nPure Python, no database needed]
     C --> E{Both pass?}
     D --> E
-    E -->|No| F[Pipeline stops here]
-    E -->|Yes| G[Wave 2: runs in parallel]
-    G --> H[Integration tests\nGitHub spins up a real\nPostgreSQL container automatically]
-    G --> I[Docker build\nVerifies image builds cleanly]
+    E -->|No — fix before wave 2| F[Pipeline stops here\nno point running database tests\nif the code has style or type errors]
+    E -->|Yes — safe to test against real DB| G[Wave 2: slower checks run in parallel]
+    G --> H[Integration tests\nGitHub spins up a real\nPostgreSQL container automatically\nTests create + drop schema each run]
+    G --> I[Docker build\nVerifies image builds cleanly\nno push yet]
     H --> J{Both pass?}
     I --> J
-    J -->|Yes| K[Deploy workflow triggers\nImage pushed to GHCR]
-    J -->|No| L[Pipeline stops here]
+    J -->|Yes — all checks green| K[Deploy workflow triggers\nBuilds image and pushes to GHCR\ntagged dev and dev-sha]
+    J -->|No — test or build failure| L[Pipeline stops here\nDeploy is blocked]
 ```
 
 The integration tests connect to a separate database called `ecommerce_test`, never the main `ecommerce` database. Running the full test suite can never touch or corrupt real simulator data.
