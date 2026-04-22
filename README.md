@@ -33,79 +33,53 @@ A realistic e-commerce OLTP (Online Transaction Processing) data generator for t
 The diagram below traces the complete journey through this repository: from the first `make` command on my laptop, through the three simulator phases, into PostgreSQL's WAL (Write-Ahead Log), picked up by AWS DMS (Database Migration Service), and landing as Parquet files in Bronze S3 (Simple Storage Service) ready for the next platform stage.
 
 ```mermaid
-flowchart TD
-    DEV(["Developer's machine\ncd platform-cdc-simulator\nrun make commands"])
+flowchart LR
+    DEV(["Developer\ncd platform-cdc-simulator\nrun make commands"])
 
-    subgraph envs["Step 0: choose where PostgreSQL runs"]
-        direction LR
-        LOCAL["Local Docker\nmake docker-up starts a PostgreSQL container\non localhost port 5432.\nNo AWS account or cost.\nBest for development and running tests."]
-        CLOUD["AWS RDS via SSM tunnel\nPostgreSQL runs in a private VPC subnet.\nSSM port-forwards localhost:5433 to the RDS instance.\nNo SSH key, no open firewall port.\nRequires terraform apply and aws sso login."]
+    subgraph env["Step 0: pick a target"]
+        direction TB
+        LOCAL["Local Docker\nmake docker-up\nPostgreSQL on localhost:5432\nNo AWS account needed"]
+        CLOUD["AWS RDS via SSM tunnel\nPrivate VPC subnet, no open ports\nSSM forwards localhost:5433 to RDS\nRequires terraform apply"]
+    end
+
+    POSTGRES[("PostgreSQL\necommerce database")]
+
+    subgraph sim["Steps 1-3: the simulator (run in order)"]
+        direction TB
+        SCH["make schema\nCREATEs 6 tables: customers, products, orders,\norder_items, payments, shipments.\nSets REPLICA IDENTITY FULL on each so DMS gets\nthe complete old row on every UPDATE.\nAdds updated_at trigger to every table."]
+        SEED["make seed\n2 years of realistic Faker data, seed=42.\nDev: 500 customers, 200 products, 2 000 orders.\nStaging/prod scale up. Status distribution\nmatches a real order lifecycle."]
+        LIVE["make simulate (runs until Ctrl+C)\nEvery 2 sec: 3 new orders, status advances,\npayments, shipments, refunds, new signups.\nOrder cap: dev 5k, staging 10k, prod 15k.\nAfter cap: advances continue, no new orders."]
+        SCH --> SEED --> LIVE
+    end
+
+    WAL["PostgreSQL WAL\n(Write-Ahead Log)\n\nEvery INSERT, UPDATE,\nand DELETE is logged\nhere before committing.\nDMS subscribes to this\nstream as a replication\nclient. This is how\nCDC works."]
+
+    subgraph dms["AWS DMS: Change Data Capture"]
+        direction TB
+        FULL["1. Full Load\nReads every existing row\nand writes LOAD*.parquet\nfiles to Bronze S3"]
+        CDCS["2. CDC Stream\nStreams every subsequent\nWAL change as a\ntimestamped .parquet file"]
+        FULL --> CDCS
+    end
+
+    BRONZE["Bronze S3\nappend-only raw landing zone\n\ns3://.../raw/TABLE/DATE/\nLOAD00000001.parquet   full snapshot\n20240115-102301.parquet CDC events\n\nop column in every file:\nI = INSERT   U = UPDATE   D = DELETE\nAll columns at moment of change.\nNever overwritten after writing."]
+
+    subgraph down["Downstream platform"]
+        direction TB
+        GLUE["Glue PySpark\nReads Bronze Parquet.\nResolves I/U/D, deduplicates.\nWrites Silver star schema."]
+        DBT["dbt on Athena\nAggregates Silver.\nRevenue, customers, products.\nWrites Gold tables."]
+        AGENT["Analytics Agent\nNL -> Claude -> SQL -> Athena\nQueries Gold. Returns\ncharts + PDF report."]
+        GLUE --> DBT --> AGENT
     end
 
     DEV --> LOCAL
     DEV --> CLOUD
-
-    POSTGRES[("PostgreSQL\necommerce database")]
-
     LOCAL --> POSTGRES
     CLOUD --> POSTGRES
-
-    subgraph phase1["Step 1: make schema (run once to create the database structure)"]
-        SCH1["CREATE TABLE x6\ncustomers, products, orders\norder_items, payments, shipments"]
-        SCH2["REPLICA IDENTITY FULL on every table\n\nBy default PostgreSQL only logs changed columns to\nthe WAL on an UPDATE. DMS needs the full old row\nto produce a complete CDC event, so this one setting\ntells PostgreSQL to always write the entire old row."]
-        SCH3["updated_at trigger on every table\n\nAuto-stamps each row with the current timestamp\nwhenever it is inserted or updated. DMS uses this\nto order events chronologically."]
-        SCH1 --> SCH2 --> SCH3
-    end
-
-    POSTGRES --> SCH1
-
-    subgraph phase2["Step 2: make seed (run once to fill the database with history)"]
-        SEED1["Inserts two years of realistic e-commerce data\ngenerated with the Faker library.\nRandom seed fixed at 42 so runs are reproducible."]
-        SEED2["Volume scales with the ENVIRONMENT variable:\n\ndev:     500 customers, 200 products,   2 000 orders\nstaging: 1 000 customers, 400 products, 5 000 orders\nprod:    2 000 customers, 800 products, 10 000 orders"]
-        SEED3["Order statuses are distributed realistically:\nmost historical orders are in delivered state\nsome are cancelled or refunded\nrecent ones are still in transit or processing\n\nThis gives DMS a rich and realistic stream of\nchanges from the very first run."]
-        SEED1 --> SEED2 --> SEED3
-    end
-
-    SCH3 --> SEED1
-
-    subgraph phase3["Step 3: make simulate (runs continuously until Ctrl+C)"]
-        TICK["Every 2 seconds one tick fires and the simulator:\n  - places 3 new orders\n  - advances existing orders through the status lifecycle\n  - records payments when orders are confirmed\n  - creates shipment records when orders ship\n  - occasionally cancels orders or issues refunds\n  - signs up new customers organically"]
-        LIFECYCLE["Order status lifecycle:\n\npending -> confirmed -> processing -> shipped -> delivered\n\nTerminal states, no further transitions:\ndelivered, cancelled, refunded"]
-        CAP["Environment order cap\n\ndev: 5 000   staging: 10 000   prod: 15 000\n\nOnce the cap is reached, the simulator stops placing\nnew orders but keeps advancing all existing ones\nthrough their lifecycle. The WAL stream stays\ncontinuously active without the database growing\nwithout bound."]
-        TICK --> LIFECYCLE --> CAP
-    end
-
-    SEED3 --> TICK
-
-    WAL["PostgreSQL WAL (Write-Ahead Log)\n\nEvery INSERT, UPDATE, and DELETE the simulator writes\nis recorded here as a binary log entry before it\ncommits to the table.\n\nThis is the CDC source. AWS DMS subscribes to\nthis stream as a logical replication client.\nThis is CDC (Change Data Capture) in action."]
-
-    CAP --> WAL
-
-    subgraph dms["AWS DMS (Database Migration Service): reading the WAL stream"]
-        DMS1["Replication Instance\nConnects to PostgreSQL as a logical replication\nsubscriber and stays connected, streaming\nevery change in real time."]
-        DMS2["Replication Task: full-load + CDC mode\n\n1. Full Load: reads every row currently in the\n   database and writes LOAD Parquet files to S3.\n\n2. CDC: streams every subsequent WAL change\n   and writes timestamped Parquet files to S3\n   as each event arrives, usually within seconds."]
-        DMS1 --> DMS2
-    end
-
-    WAL --> DMS1
-
-    subgraph s3["Bronze S3: append-only raw landing zone"]
-        S3F["s3://edp-dev-ACCOUNT-bronze/raw/\n\ncustomers/\n  20240115/\n    LOAD00000001.parquet            full snapshot on first run\n    20240115-102301-0001.parquet    CDC events after that\norders/  payments/  shipments/  (one folder per table)"]
-        S3N["Each Parquet file includes an op column:\n  I = INSERT (a new row was added)\n  U = UPDATE (an existing row changed)\n  D = DELETE (a row was removed)\n\nAll column values are captured at the moment of change.\nThe Bronze layer is never modified after writing.\nGlue PySpark reads and resolves these events next."]
-        S3F --> S3N
-    end
-
-    DMS2 --> S3F
-
-    subgraph downstream["The rest of the Enterprise Data Platform"]
-        direction LR
-        GLUE["platform-glue-jobs\nGlue PySpark reads Bronze Parquet files.\nResolves I, U, D into the latest row state.\nDeduplicates rows. Quarantines invalid data.\nWrites a clean Silver star schema to S3."]
-        DBT["platform-dbt-analytics\ndbt on Athena reads Silver tables.\nRuns business logic aggregations:\nrevenue, customer segments, product performance.\nWrites Gold dimension and fact tables."]
-        AGENT["platform-analytics-agent\nFastAPI + Streamlit + Claude API\nStakeholders type plain-English questions.\nClaude converts them to SQL.\nAthena queries Gold. Results come back as\ncharts, insights, and PDF reports."]
-        GLUE --> DBT --> AGENT
-    end
-
-    S3N --> GLUE
+    POSTGRES --> SCH
+    LIVE --> WAL
+    WAL --> FULL
+    CDCS --> BRONZE
+    BRONZE --> GLUE
 ```
 
 ---
