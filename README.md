@@ -161,11 +161,11 @@ Once the order limit is reached, the simulator stops creating new orders but kee
 
 ## Local setup (Docker)
 
-This runs everything on your Mac with a local PostgreSQL container. No AWS account or costs involved.
+This runs everything locally in Docker. No AWS account or costs involved.
 
 **Step 1: Install pyenv**
 
-pyenv manages Python versions. The `.python-version` file in this repo tells pyenv to use 3.11.8 automatically when you `cd` into the project.
+pyenv manages Python versions. The `.python-version` file in this repo tells pyenv to use 3.11.8 automatically when I `cd` into the project.
 
 ```bash
 brew install pyenv
@@ -185,7 +185,7 @@ cd platform-cdc-simulator
 make setup
 ```
 
-This creates a `.venv` folder with all Python packages installed. The packages are isolated, so they don't affect anything else on your Mac.
+This creates a `.venv` folder with all Python packages installed. The packages are isolated from anything else on the system.
 
 **Step 3: Configure the environment**
 
@@ -193,7 +193,7 @@ This creates a `.venv` folder with all Python packages installed. The packages a
 cp .env.example .env
 ```
 
-The `.env` file already has the right values for local Docker development. You don't need to change anything.
+The `.env` file already has the right values for local Docker development. Nothing needs to change.
 
 **Step 4: Start the local PostgreSQL database**
 
@@ -220,7 +220,7 @@ make seed      # fill with 2 years of historical data (~2,000 orders for dev)
 make simulate  # starts the live traffic loop — Ctrl+C to stop
 ```
 
-You'll see log output every few seconds showing new orders being placed and existing ones advancing through their lifecycle. Every write also appears in the PostgreSQL WAL.
+The simulator logs output every few seconds showing new orders being placed and existing ones advancing through their lifecycle. Every write also appears in the PostgreSQL WAL.
 
 **Reset to a clean state at any time:**
 
@@ -232,7 +232,7 @@ make reset     # drops all tables, recreates schema, reseeds — destroys all da
 
 ## Cloud setup (AWS RDS via SSM tunnel)
 
-RDS lives in private subnets with no internet route. To connect from your Mac, you open an SSM (Systems Manager) port-forwarding session through the bastion EC2 (Elastic Compute Cloud) instance Terraform creates. No SSH keys and no open firewall ports are needed. The connection goes entirely through AWS's private network.
+RDS lives in private subnets with no internet route. To connect from a local machine, I open an SSM (Systems Manager) port-forwarding session through the bastion EC2 (Elastic Compute Cloud) instance Terraform creates. No SSH keys and no open firewall ports are needed. The connection goes entirely through AWS's private network.
 
 **Before starting, make sure:**
 
@@ -248,7 +248,7 @@ After `make apply dev`, Terraform prints an `ssm_tunnel_command` output. Copy it
 ssm_tunnel_command = "aws ssm start-session --target i-0abc123 --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters 'host=edp-dev-source-db.xxx.eu-central-1.rds.amazonaws.com,portNumber=5432,localPortNumber=5433' --profile dev-admin"
 ```
 
-If you need to retrieve it again later:
+To retrieve it again later:
 
 ```bash
 cd terraform-platform-infra-live/environments/dev
@@ -384,7 +384,7 @@ All configuration comes from environment variables. For local runs, these are lo
 | `RETRY_WAIT_MIN_SECONDS` | No | `1` | Minimum wait between retry attempts. |
 | `RETRY_WAIT_MAX_SECONDS` | No | `30` | Maximum wait between retry attempts. |
 
-Copy `.env.example` to `.env` and fill in your values. The real `.env` is in `.gitignore`, so passwords never end up in git.
+Copy `.env.example` to `.env` and fill in the values. The real `.env` is in `.gitignore`, so passwords never end up in git.
 
 ---
 
@@ -411,7 +411,7 @@ For AWS RDS (SSM tunnel must be open):
 make test ENV=dev
 ```
 
-Integration tests use `TEST_DB_NAME` (default: `ecommerce_test`), never `DB_NAME`. The test fixture creates a fresh schema before each test and drops it after, so tests can never corrupt your simulator data. Every integration test runs in complete isolation.
+Integration tests use `TEST_DB_NAME` (default: `ecommerce_test`), never `DB_NAME`. The test fixture creates a fresh schema before each test and drops it after, so tests can never corrupt simulator data. Every integration test runs in complete isolation.
 
 **Test coverage:**
 
@@ -550,7 +550,7 @@ Trigger the Deploy workflow manually from GitHub Actions, choose the target envi
 
 Most test suites load sample data from CSV files. I didn't do that here, and it's worth explaining why.
 
-A CSV is static. The moment the database schema changes, the CSV goes out of date and the tests start lying to you — they pass even when the real code would fail. Instead, the tests create the actual PostgreSQL schema from scratch before each test and destroy it afterwards. The schema itself becomes the test environment.
+A CSV is static. The moment the database schema changes, the CSV goes out of date and the tests start lying: they pass even when the real code would fail. Instead, the tests create the actual PostgreSQL schema from scratch before each test and destroy it afterwards. The schema itself becomes the test environment.
 
 There are two layers of tests.
 
