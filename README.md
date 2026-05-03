@@ -2,17 +2,21 @@
 
 This repository is part of the [Enterprise Data Platform](https://github.com/enterprise-data-platform-emeka/platform-docs). For the full project overview, architecture diagram, and build order, start there.
 
-**Previous:** [terraform-platform-infra-live](https://github.com/enterprise-data-platform-emeka/terraform-platform-infra-live): that repo provisioned the VPC, RDS PostgreSQL, DMS replication task, and S3 buckets that the simulator writes into.
+**Previous:** [terraform-platform-infra-live](https://github.com/enterprise-data-platform-emeka/terraform-platform-infra-live) provisioned the VPC (Virtual Private Cloud), RDS (Relational Database Service) PostgreSQL, DMS (Database Migration Service) replication task, and S3 (Simple Storage Service) buckets that this simulator writes into.
 
 ---
 
-A realistic e-commerce OLTP (Online Transaction Processing) data generator for the Enterprise Data Platform. It writes customer orders, payments, and shipments into a PostgreSQL (Postgres) database so AWS DMS (Database Migration Service) can capture every change and forward it to the Bronze S3 (Simple Storage Service) layer. Without this simulator, there's no source data to flow through the pipeline. It's the starting gun.
+A realistic e-commerce OLTP (Online Transaction Processing) data generator. It writes customer orders, payments, and shipments into a PostgreSQL database so AWS DMS can capture every change and forward it to the Bronze S3 layer as Parquet files. Without this simulator, there's no source data to flow through the pipeline.
 
 ---
 
 ## Contents
 
-- [What it does](#what-it-does)
+- [Before you start: Understanding CDC, WAL, and DMS](#before-you-start-understanding-cdc-wal-and-dms)
+- [Beginner glossary](#beginner-glossary)
+- [How this repository connects to the platform](#how-this-repository-connects-to-the-platform)
+- [What lands in Bronze S3](#what-lands-in-bronze-s3)
+- [What the simulator does](#what-the-simulator-does)
 - [Data model](#data-model)
 - [How much data it creates](#how-much-data-it-creates)
 - [Prerequisites](#prerequisites)
@@ -24,87 +28,263 @@ A realistic e-commerce OLTP (Online Transaction Processing) data generator for t
 - [Docker](#docker)
 - [Code structure](#code-structure)
 - [CI/CD](#cicd)
-- [How DMS reads this data](#how-dms-reads-this-data)
 
 ---
 
-## How it all fits together
+## Before you start: Understanding CDC, WAL, and DMS
 
-The diagram below traces the complete journey through this repository: from the first `make` command on my laptop, through the three simulator phases, into PostgreSQL's WAL (Write-Ahead Log), picked up by AWS DMS (Database Migration Service), and landing as Parquet files in Bronze S3 (Simple Storage Service) ready for the next platform stage.
+If you're new to data engineering, three concepts in this project might not be obvious: CDC (Change Data Capture), WAL (Write-Ahead Log), and DMS. Understanding them makes everything else in the platform click into place.
+
+### The problem: how do you keep a data warehouse in sync with a live database?
+
+Imagine an e-commerce database. Every second: new orders are placed, existing orders change status, payments are confirmed, shipments are created. Your data warehouse needs to reflect all of this. How?
+
+The obvious approach is **polling**: every hour, run a query like `SELECT * FROM orders WHERE updated_at > last_run`. This works, but has serious problems.
+
+**CDC is the better approach.** Instead of querying, you subscribe to the database's own internal change log. Every change that happens in the database is recorded in that log before it's even written to the tables. You read the log and you get every change, in order, with nothing missed.
+
+The simplest way to understand CDC is to compare it with polling:
+
+| Approach | How it works | Beginner-friendly summary |
+|---|---|---|
+| Polling | A scheduled job repeatedly runs `SELECT * FROM table WHERE updated_at > last_run_time`. | Easy to start, but it can miss deletes, miss intermediate updates, and put load on the live database. |
+| CDC | A replication reader subscribes to the database change log and receives every insert, update, and delete. | More reliable for pipelines because it follows the same stream the database uses for replication and recovery. |
 
 ```mermaid
-flowchart LR
-    DEV(["Developer\ncd platform-cdc-simulator\nrun make commands"])
+flowchart TB
+    classDef source fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:1px
+    classDef risk fill:#fff1f2,stroke:#f43f5e,color:#881337,stroke-width:1px
+    classDef good fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:1px
 
-    subgraph env["Step 0: pick a target"]
+    DB["Live PostgreSQL database"]:::source
+
+    POLL["Polling job\nRuns SELECT on a schedule"]:::risk
+    POLL_OUT["Possible issues\nDeletes are hard to detect\nIntermediate changes can be skipped\nData is stale between runs"]:::risk
+
+    CDC["CDC reader\nSubscribes to the database log"]:::good
+    CDC_OUT["Result\nEvery INSERT, UPDATE, DELETE\narrives as an event\nin the same order it happened"]:::good
+
+    DB --> POLL --> POLL_OUT
+    DB --> CDC --> CDC_OUT
+```
+
+### What is the WAL?
+
+WAL stands for Write-Ahead Log. PostgreSQL writes every change to this log **before** it writes to the actual tables. This exists for crash recovery: if the database crashes mid-write, it can replay the WAL on restart to restore a consistent state.
+
+This log is also how database **replication** works. When you create a read replica of a PostgreSQL database, the replica subscribes to the WAL of the primary and replays every change. AWS DMS uses the exact same mechanism. It connects to PostgreSQL as a replication client, reads the WAL stream, and forwards every change to S3.
+
+### What is DMS?
+
+AWS DMS (Database Migration Service) is a managed service that does two things in sequence:
+
+1. **Full Load:** reads every existing row from every table and writes them to S3 as Parquet files. This is the starting snapshot.
+2. **CDC stream:** after the full load, DMS stays connected to the WAL and writes every subsequent INSERT, UPDATE, and DELETE as raw CDC records in Parquet files.
+
+This is what feeds the Bronze layer: one raw record per database event, timestamped, with the operation type (`op` column) preserved. Depending on batching, one Parquet file can contain multiple CDC records. The rest of the platform (Glue, dbt, the Analytics Agent) builds on top of these files.
+
+```mermaid
+sequenceDiagram
+    participant PG as PostgreSQL RDS
+    participant WAL as WAL
+    participant DMS as AWS DMS
+    participant S3 as Bronze S3
+
+    PG->>DMS: Full Load starts
+    DMS->>PG: Read existing rows from selected tables
+    DMS->>S3: Write LOAD*.parquet snapshot files
+    PG->>WAL: New INSERT/UPDATE/DELETE events continue
+    DMS->>WAL: Subscribe as a replication client
+    WAL->>DMS: Stream each committed change
+    DMS->>S3: Write timestamped CDC Parquet files
+```
+
+## Beginner glossary
+
+| Term | Meaning in this project |
+|---|---|
+| CDC (Change Data Capture) | Capturing row-level database changes as events instead of repeatedly querying tables. |
+| WAL (Write-Ahead Log) | PostgreSQL's internal log of changes. PostgreSQL writes here before the table data is finalized. |
+| DMS (Database Migration Service) | The AWS service that reads PostgreSQL changes and writes them to S3. |
+| Full Load | The first snapshot DMS takes: every existing row is copied once. |
+| CDC stream | The continuous phase after Full Load: every new insert, update, and delete is copied. |
+| Bronze S3 | The raw, append-only landing zone. It stores what DMS wrote, without cleaning or deduplicating it. |
+| Silver | The cleaned layer created later by Glue. It keeps the latest valid version of each entity. |
+| `op` column | A DMS column that says what happened: `I` for insert, `U` for update, `D` for delete. |
+| Parquet | A columnar file format used for efficient analytics queries on S3. |
+
+---
+
+## How this repository connects to the platform
+
+This repository generates the source data. Everything downstream depends on it.
+
+Read this flow in four small stages:
+
+1. This repo creates and changes rows in PostgreSQL.
+2. PostgreSQL records those changes in the WAL.
+3. AWS DMS reads the WAL and writes raw Parquet files into Bronze S3.
+4. The rest of the platform cleans, models, and serves that data.
+
+```mermaid
+flowchart TB
+    classDef sim  fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px
+    classDef db   fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:2px
+    classDef dms  fill:#fef3c7,stroke:#d97706,color:#78350f,stroke-width:2px
+    classDef brz  fill:#fef3c7,stroke:#d97706,color:#78350f,stroke-width:2px
+    classDef down fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:2px
+
+    subgraph REPO["1. This repository: generate realistic source traffic"]
         direction TB
-        LOCAL["Local Docker\nmake docker-up\nPostgreSQL on localhost:5432\nNo AWS account needed"]
-        CLOUD["AWS RDS via SSM tunnel\nPrivate VPC subnet, no open ports\nSSM forwards localhost:5433 to RDS\nRequires terraform apply"]
+        P1["make schema\nCreate 6 tables"]:::sim
+        P2["make seed\nInsert historical data"]:::sim
+        P3["make simulate\nKeep changing rows"]:::sim
+        P1 --> P2 --> P3
     end
 
-    POSTGRES[("PostgreSQL\necommerce database")]
-
-    subgraph sim["Steps 1-3: the simulator (run in order)"]
+    subgraph PG_BOX["2. PostgreSQL source database"]
         direction TB
-        SCH["make schema\nCREATEs 6 tables: customers, products, orders,\norder_items, payments, shipments.\nSets REPLICA IDENTITY FULL on each so DMS gets\nthe complete old row on every UPDATE.\nAdds updated_at trigger to every table."]
-        SEED["make seed\n2 years of realistic Faker data, seed=42.\nDev: 500 customers, 200 products, 2 000 orders.\nStaging/prod scale up. Status distribution\nmatches a real order lifecycle."]
-        LIVE["make simulate (runs until Ctrl+C)\nEvery 2 sec: 3 new orders, status advances,\npayments, shipments, refunds, new signups.\nOrder cap: dev 5k, staging 10k, prod 15k.\nAfter cap: advances continue, no new orders."]
-        SCH --> SEED --> LIVE
+        DB["Tables\ncustomers, orders,\npayments, shipments"]:::db
+        WAL["WAL\nEvery committed change\nis logged here"]:::db
+        DB --> WAL
     end
 
-    WAL["PostgreSQL WAL\n(Write-Ahead Log)\n\nEvery INSERT, UPDATE,\nand DELETE is logged\nhere before committing.\nDMS subscribes to this\nstream as a replication\nclient. This is how\nCDC works."]
-
-    subgraph dms["AWS DMS: Change Data Capture"]
+    subgraph DMS_BOX["3. AWS DMS: copy source changes to S3"]
         direction TB
-        FULL["1. Full Load\nReads every existing row\nand writes LOAD*.parquet\nfiles to Bronze S3"]
-        CDCS["2. CDC Stream\nStreams every subsequent\nWAL change as a\ntimestamped .parquet file"]
-        FULL --> CDCS
+        D1["Full Load\nCopy existing rows once"]:::dms
+        D2["CDC Stream\nCopy new changes continuously"]:::dms
+        D1 --> D2
     end
 
-    BRONZE["Bronze S3\nappend-only raw landing zone\n\ns3://.../raw/TABLE/DATE/\nLOAD00000001.parquet   full snapshot\n20240115-102301.parquet CDC events\n\nop column in every file:\nI = INSERT   U = UPDATE   D = DELETE\nAll columns at moment of change.\nNever overwritten after writing."]
+    BRONZE["Bronze S3\nRaw Parquet files\nAppend-only audit trail"]:::brz
 
-    subgraph down["Downstream platform"]
+    subgraph NEXT["4. Downstream platform"]
         direction TB
-        GLUE["Glue PySpark\nReads Bronze Parquet.\nResolves I/U/D, deduplicates.\nWrites Silver star schema."]
-        DBT["dbt on Athena\nAggregates Silver.\nRevenue, customers, products.\nWrites Gold tables."]
-        AGENT["Analytics Agent\nNL -> Claude -> SQL -> Athena\nQueries Gold. Returns\ncharts + PDF report."]
-        GLUE --> DBT --> AGENT
+        G["Glue PySpark\nReconcile CDC into Silver"]:::down
+        D["dbt + Athena\nBuild Gold marts"]:::down
+        A["Analytics Agent\nAnswer business questions"]:::down
+        G --> D --> A
     end
 
-    DEV --> LOCAL
-    DEV --> CLOUD
-    LOCAL --> POSTGRES
-    CLOUD --> POSTGRES
-    POSTGRES --> SCH
-    LIVE --> WAL
-    WAL --> FULL
-    CDCS --> BRONZE
-    BRONZE --> GLUE
+    REPO --> DB
+    WAL --> DMS_BOX
+    DMS_BOX --> BRONZE
+    BRONZE --> G
+
+    style REPO    fill:#f5f3ff,stroke:#ddd6fe,stroke-width:1px
+    style DMS_BOX fill:#fffbeb,stroke:#fde68a,stroke-width:1px
+    style NEXT    fill:#f0fdf4,stroke:#bbf7d0,stroke-width:1px
 ```
 
 ---
 
-## What it does
+## What lands in Bronze S3
 
-The simulator does three things in sequence:
+This is the key concept to understand before working with the rest of the platform.
 
-1. **Schema**: creates six tables that mirror a real e-commerce system, sets `REPLICA IDENTITY FULL` on every table (required for DMS CDC), and adds `updated_at` triggers.
-2. **Seed**: fills the database with two years of historical data (customers, products, orders with realistic lifecycle distributions).
-3. **Simulate**: runs a continuous loop that places new orders, advances orders through statuses (pending → confirmed → shipped → delivered), completes payments, creates shipment records, and occasionally cancels or refunds orders.
+In a real e-commerce system, one order goes through multiple status changes. It starts as `pending`, gets confirmed, ships, and eventually delivers. Each of those status changes is a separate database event. DMS writes each event as a **raw CDC record** in Bronze with an `op` column that records what happened.
 
-Every write lands in PostgreSQL's WAL (Write-Ahead Log), which is PostgreSQL's internal record of every change. AWS DMS reads the WAL and writes each change to S3 as a Parquet file. That's CDC (Change Data Capture) in action.
+```mermaid
+flowchart TB
+    classDef db fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:1px
+    classDef dms fill:#fef3c7,stroke:#d97706,color:#78350f,stroke-width:1px
+    classDef out fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:1px
+
+    A["Database event 1\nINSERT order_id 123\nstatus = pending"]:::db
+    B["Database event 2\nUPDATE order_id 123\nstatus = confirmed"]:::db
+    C["Database event 3\nUPDATE order_id 123\nstatus = shipped"]:::db
+    D["Database event 4\nUPDATE order_id 123\nstatus = delivered"]:::db
+
+    DMS["AWS DMS reads each event\nfrom the PostgreSQL WAL"]:::dms
+
+    F["Bronze S3 receives 4 raw records\nfor the same order_id\nNothing is deduplicated here"]:::out
+
+    A --> DMS
+    B --> DMS
+    C --> DMS
+    D --> DMS
+    DMS --> F
+```
+
+This is why Bronze is called "raw": it contains every event, not just the current state. The Silver layer (produced by Glue) is where those events get collapsed into one clean row per entity.
+
+The `op` column values are:
+- `I` — an INSERT (a new row was created)
+- `U` — an UPDATE (an existing row was changed; DMS captures the full row after the change)
+- `D` — a DELETE (a row was removed; DMS captures the last known row before deletion)
+
+For one order, Bronze might look like this:
+
+| `order_id` | `op` | `order_status` | What this row means |
+|---|---:|---|---|
+| `123` | `I` | `pending` | The order was created. |
+| `123` | `U` | `confirmed` | The same order changed status. |
+| `123` | `U` | `shipped` | The same order changed status again. |
+| `123` | `U` | `delivered` | This is the latest known version. |
+
+Bronze keeps all four rows because Bronze is an audit trail. Silver keeps only the latest valid row because Silver is the clean current-state layer.
+
+```mermaid
+flowchart TB
+    classDef raw fill:#fef3c7,stroke:#d97706,color:#78350f,stroke-width:1px
+    classDef job fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:1px
+    classDef clean fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:2px
+
+    B1["Bronze row\nop I, pending"]:::raw
+    B2["Bronze row\nop U, confirmed"]:::raw
+    B3["Bronze row\nop U, shipped"]:::raw
+    B4["Bronze row\nop U, delivered"]:::raw
+
+    GLUE["Glue CDC reconciliation\nGroup by order_id\nSort newest first\nIgnore deleted rows\nKeep the latest valid row"]:::job
+
+    SILVER["Silver row\norder_id 123\nstatus = delivered"]:::clean
+
+    B1 --> GLUE
+    B2 --> GLUE
+    B3 --> GLUE
+    B4 --> GLUE
+    GLUE --> SILVER
+```
+
+---
+
+## What the simulator does
+
+The simulator runs three phases in sequence. Each phase builds on the previous one.
+
+```mermaid
+flowchart TB
+    classDef phase fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px
+    classDef note  fill:#f1f5f9,stroke:#64748b,color:#1e293b,stroke-width:1px
+
+    P1["make schema"]:::phase
+    P2["make seed"]:::phase
+    P3["make simulate"]:::phase
+
+    N1["Creates 6 tables:\ncustomers, products, orders,\norder_items, payments, shipments\n\nSets REPLICA IDENTITY FULL\non every table so DMS captures\nthe complete row on every UPDATE\n\nAdds updated_at triggers"]:::note
+    N2["Fills the database with\n2 years of realistic historical data:\n500 customers, 200 products,\n2,000 orders (dev environment)\n\nOrders have realistic status\ndistributions: most are delivered,\na fraction cancelled or refunded"]:::note
+    N3["Runs a continuous loop:\nevery 2 seconds:\n3 new orders placed\nExisting orders advance\nthrough their lifecycle\nPayments and shipments created\nOccasional cancellations and refunds\n\nCtrl+C to stop"]:::note
+
+    P1 --> N1 --> P2 --> N2 --> P3 --> N3
+
+    style N1 fill:#f5f3ff,stroke:#ddd6fe,stroke-width:1px
+    style N2 fill:#f5f3ff,stroke:#ddd6fe,stroke-width:1px
+    style N3 fill:#f5f3ff,stroke:#ddd6fe,stroke-width:1px
+```
+
+Every write the simulator makes lands in PostgreSQL's WAL, which DMS picks up and forwards to Bronze S3.
 
 ---
 
 ## Data model
 
-Six tables representing a European e-commerce business:
+Six tables that model a European e-commerce business. Two reference tables hold customers and products (they change rarely). Four transaction tables record business events.
 
 ```
 customers ──< orders ──< order_items >── products
-                │
-                ├──< payments
-                └──< shipments
+               │
+               ├──< payments
+               └──< shipments
 ```
 
 | Table | Key columns |
@@ -116,13 +296,17 @@ customers ──< orders ──< order_items >── products
 | `payments` | payment_id, order_id, method, amount, status, payment_date |
 | `shipments` | shipment_id, order_id, carrier, delivery_status, shipped_date, delivered_date |
 
-Every table also has an `updated_at` column that updates automatically on every row change via a PostgreSQL trigger.
+Every table has an `updated_at` column that updates automatically on every row change via a PostgreSQL trigger.
 
 **Order lifecycle:** `pending` → `confirmed` → `processing` → `shipped` → `delivered`
 
 Terminal states (no further transitions): `delivered`, `cancelled`, `refunded`
 
-**Why `REPLICA IDENTITY FULL`?** PostgreSQL normally only writes changed columns to the WAL on an UPDATE. DMS needs the complete old row to produce a full CDC event. Setting `REPLICA IDENTITY FULL` tells PostgreSQL to write the entire old row on every change.
+**Why `REPLICA IDENTITY FULL`?**
+
+By default, PostgreSQL only writes the **changed columns** to the WAL on an UPDATE. For example, if only the `order_status` column changes, the WAL entry only contains `order_status`. DMS can't build a complete Parquet row from just one column.
+
+Setting `REPLICA IDENTITY FULL` tells PostgreSQL to write the **entire row** to the WAL on every UPDATE, not just what changed. DMS can then produce a complete Parquet record for every event.
 
 ---
 
@@ -136,7 +320,7 @@ The simulator respects per-environment limits so it never creates more data than
 | `staging` | 10,000 | 1,000 | 400 | 5,000 |
 | `prod` | 15,000 | 2,000 | 800 | 10,000 |
 
-Once the order limit is reached, the simulator stops creating new orders but keeps advancing existing ones (status transitions, shipments, refunds). The CDC stream stays active without the database growing indefinitely.
+Once the order limit is reached, the simulator stops creating new orders but keeps advancing existing ones through their lifecycle. The CDC stream stays active without the database growing indefinitely.
 
 ---
 
@@ -165,7 +349,7 @@ This runs everything locally in Docker. No AWS account or costs involved.
 
 **Step 1: Install pyenv**
 
-pyenv manages Python versions. The `.python-version` file in this repo tells pyenv to use 3.11.8 automatically when I `cd` into the project.
+pyenv manages Python versions. The `.python-version` file in this repo tells pyenv to use 3.11.8 automatically when you `cd` into the project.
 
 ```bash
 brew install pyenv
@@ -185,7 +369,7 @@ cd platform-cdc-simulator
 make setup
 ```
 
-This creates a `.venv` folder with all Python packages installed. The packages are isolated from anything else on the system.
+This creates a `.venv` folder with all Python packages installed, isolated from anything else on the system.
 
 **Step 3: Configure the environment**
 
@@ -201,7 +385,7 @@ The `.env` file already has the right values for local Docker development. Nothi
 make docker-up
 ```
 
-This starts a PostgreSQL container on port 5432. It also creates two databases automatically:
+This starts a PostgreSQL container on port 5432. It also creates two databases:
 - `ecommerce`: the simulator's database
 - `ecommerce_test`: used by the integration test suite (keeps test runs isolated from simulator data)
 
@@ -211,7 +395,7 @@ Wait for the output `PostgreSQL is ready.` before continuing.
 
 ```bash
 make schema    # create the six tables, indexes, and triggers
-make seed      # fill with 2 years of historical data (~2,000 orders for dev)
+make seed      # fill with 2 years of historical data
 ```
 
 **Step 6: Run the simulator**
@@ -220,7 +404,7 @@ make seed      # fill with 2 years of historical data (~2,000 orders for dev)
 make simulate  # starts the live traffic loop — Ctrl+C to stop
 ```
 
-The simulator logs output every few seconds showing new orders being placed and existing ones advancing through their lifecycle. Every write also appears in the PostgreSQL WAL.
+The simulator logs output every few seconds showing new orders being placed and existing ones advancing. Every write lands in the PostgreSQL WAL. If you're running against AWS RDS with DMS active, those changes appear in Bronze S3 within 1-2 minutes.
 
 **Reset to a clean state at any time:**
 
@@ -232,23 +416,37 @@ make reset     # drops all tables, recreates schema, reseeds — destroys all da
 
 ## Cloud setup (AWS RDS via SSM tunnel)
 
-RDS lives in private subnets with no internet route. To connect from a local machine, I open an SSM (Systems Manager) port-forwarding session through the bastion EC2 (Elastic Compute Cloud) instance Terraform creates. No SSH keys and no open firewall ports are needed. The connection goes entirely through AWS's private network.
+RDS lives in private subnets with no internet route. To connect from a local machine, I open an SSM (Systems Manager) port-forwarding session through the bastion EC2 (Elastic Compute Cloud) instance Terraform creates. No SSH keys and no open firewall ports are needed.
 
-**Before starting, make sure:**
+```mermaid
+flowchart LR
+    classDef local fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:2px
+    classDef aws   fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:2px
+    classDef priv  fill:#fef3c7,stroke:#d97706,color:#78350f,stroke-width:2px
+
+    LAP["Your laptop\nlocalhost:5433"]:::local
+    BAS["Bastion EC2\nprivate subnet\nno public SSH port\nSSM agent only"]:::aws
+    RDS["RDS PostgreSQL\nprivate subnet\nno internet route"]:::priv
+
+    LAP -->|"SSM Session Manager\nencrypted tunnel\nno open ports"| BAS
+    BAS -->|"private VPC network\nport 5432"| RDS
+```
+
+**Before starting:**
 
 1. Infrastructure is applied: `make apply dev` completed in `terraform-platform-infra-live`
-2. SSM Session Manager Plugin is installed (`brew install --cask session-manager-plugin`)
-3. Your AWS SSO session is active: `aws sso login --profile dev-admin`
+2. SSM Session Manager Plugin is installed: `brew install --cask session-manager-plugin`
+3. AWS SSO session is active: `aws sso login --profile dev-admin`
 
-**Step 1: Get the tunnel command from Terraform output**
+**Step 1: Get the tunnel command**
 
-After `make apply dev`, Terraform prints an `ssm_tunnel_command` output. Copy it. It looks like this:
+After `make apply dev`, Terraform prints an `ssm_tunnel_command` output. Copy it:
 
 ```
 ssm_tunnel_command = "aws ssm start-session --target i-0abc123 --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters 'host=edp-dev-source-db.xxx.eu-central-1.rds.amazonaws.com,portNumber=5432,localPortNumber=5433' --profile dev-admin"
 ```
 
-To retrieve it again later:
+To retrieve it later:
 
 ```bash
 cd terraform-platform-infra-live/environments/dev
@@ -257,7 +455,7 @@ terraform output ssm_tunnel_command
 
 **Step 2: Open the SSM tunnel (Terminal 1)**
 
-Paste and run the tunnel command. You'll see:
+Paste and run the command. You'll see:
 
 ```
 Starting session with SessionId: dev-admin-xxxxxxxxxx
@@ -265,19 +463,9 @@ Port 5433 forwarded
 Waiting for connections...
 ```
 
-Leave this terminal open. The tunnel must stay running while the simulator is active. If it closes, the simulator loses its connection to RDS.
+Leave this terminal open. The tunnel must stay running while the simulator is active.
 
-**Step 3: Verify the tunnel is working (optional)**
-
-In a new terminal:
-
-```bash
-psql -h localhost -p 5433 -U postgres -d ecommerce
-```
-
-If it prompts for a password, the tunnel is working. Ctrl+C to exit without entering a password.
-
-**Step 4: Run the simulator (Terminal 2)**
+**Step 3: Run the simulator (Terminal 2)**
 
 ```bash
 cd platform-cdc-simulator
@@ -286,7 +474,7 @@ make seed   ENV=dev     # seed historical data
 make simulate ENV=dev   # run the live traffic loop (Ctrl+C to stop)
 ```
 
-The Makefile fetches the RDS password live from AWS SSM Parameter Store, so no password file is ever created on disk. It calls:
+The Makefile fetches the RDS password live from AWS SSM Parameter Store. No password file is ever created on disk:
 
 ```bash
 aws ssm get-parameter \
@@ -297,9 +485,7 @@ aws ssm get-parameter \
   --profile dev-admin
 ```
 
-Then sets `DB_HOST=localhost`, `DB_PORT=5433`, and all other variables before running the simulator.
-
-**Step 5: Verify data in S3 (optional)**
+**Step 4: Verify data in S3 (optional)**
 
 Once DMS picks up the changes (usually within 1-2 minutes of starting the DMS task), Parquet files appear in the Bronze bucket:
 
@@ -307,18 +493,14 @@ Once DMS picks up the changes (usually within 1-2 minutes of starting the DMS ta
 aws s3 ls s3://edp-dev-{account-id}-bronze/raw/ --recursive --profile dev-admin
 ```
 
-**Step 6: Stop and clean up**
+**Step 5: Stop and clean up**
 
-Stop the simulator with Ctrl+C in Terminal 2. Close the SSM tunnel in Terminal 1 with Ctrl+C. Then destroy all infrastructure:
+Stop the simulator with Ctrl+C in Terminal 2. Close the SSM tunnel with Ctrl+C in Terminal 1. Then destroy all infrastructure:
 
 ```bash
 cd terraform-platform-infra-live
 make destroy dev
 ```
-
-**Switching environments:**
-
-Replace `ENV=dev` with `ENV=staging` or `ENV=prod`. The Makefile uses the matching AWS profile (`staging-admin` / `prod-admin`) and SSM path automatically.
 
 ---
 
@@ -390,15 +572,57 @@ Copy `.env.example` to `.env` and fill in the values. The real `.env` is in `.gi
 
 ## Running tests
 
+There are two types of tests. Unit tests check individual pieces of logic in isolation, with no database needed. Integration tests check the full application against a real PostgreSQL database.
+
+I didn't use CSV fixtures here, which is the typical approach. A CSV is static: the moment the schema changes, the CSV goes out of date and the tests silently lie. Instead, the integration tests create the actual PostgreSQL schema from scratch before each test and drop it after. The real schema becomes the test environment.
+
+```mermaid
+flowchart TD
+    classDef pass fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:1px
+    classDef fail fill:#fff1f2,stroke:#f43f5e,color:#881337,stroke-width:1px
+    classDef step fill:#f1f5f9,stroke:#64748b,color:#1e293b,stroke-width:1px
+    classDef gate fill:#fef3c7,stroke:#d97706,color:#78350f,stroke-width:2px
+
+    PUSH["Push to GitHub"]:::step
+
+    subgraph W1["Wave 1 — fast checks, run in parallel, no database needed"]
+        direction LR
+        LINT["Lint and type check\nruff + mypy\n~10 seconds"]:::step
+        UNIT["Unit tests\nPure Python, no database\n~5 seconds"]:::step
+    end
+
+    GATE{"Both wave 1\nchecks pass?"}:::gate
+
+    STOP1["Pipeline stops here\nFix the code before\ntesting against a database"]:::fail
+
+    subgraph W2["Wave 2 — slower checks, run in parallel, requires database"]
+        direction LR
+        INT["Integration tests\nGitHub spins up a real\nPostgreSQL container\nTests create and drop\nschema around each run"]:::step
+        BUILD["Docker build\nVerifies the Dockerfile\nbuilds cleanly"]:::step
+    end
+
+    GATE2{"Both wave 2\nchecks pass?"}:::gate
+
+    DEPLOY["Deploy workflow\nBuilds Docker image\nPushes to GHCR\ntagged dev and dev-sha"]:::pass
+
+    STOP2["Pipeline stops here\nDeploy blocked"]:::fail
+
+    PUSH --> W1
+    W1 --> GATE
+    GATE -->|"yes"| W2
+    GATE -->|"no"| STOP1
+    W2 --> GATE2
+    GATE2 -->|"yes"| DEPLOY
+    GATE2 -->|"no"| STOP2
+```
+
 **Unit tests (no database required):**
 
 ```bash
 make test-unit
 ```
 
-Runs all tests that don't need a database. Tests config loading, exception hierarchy, model generation, and SQL DDL strings.
-
-**Integration tests (requires PostgreSQL):**
+**Integration tests:**
 
 For local Docker:
 ```bash
@@ -411,7 +635,7 @@ For AWS RDS (SSM tunnel must be open):
 make test ENV=dev
 ```
 
-Integration tests use `TEST_DB_NAME` (default: `ecommerce_test`), never `DB_NAME`. The test fixture creates a fresh schema before each test and drops it after, so tests can never corrupt simulator data. Every integration test runs in complete isolation.
+Integration tests use `TEST_DB_NAME` (default: `ecommerce_test`), never `DB_NAME`. Running the full test suite can never touch or corrupt real simulator data.
 
 **Test coverage:**
 
@@ -442,75 +666,81 @@ make docker-logs      # tail logs from all containers
 make docker-build     # builds cdc-simulator:latest locally
 ```
 
-The `Dockerfile` uses a two-stage build: stage one installs Python packages, stage two copies only what's needed into a slim final image. The container runs as a non-root user. This image can be deployed to AWS ECS (Elastic Container Service) to run the simulator in the cloud without needing a laptop connection.
-
-On merge to `main`, GitHub Actions automatically builds and pushes the image to GitHub Container Registry.
+The `Dockerfile` uses a two-stage build: stage one installs Python packages, stage two copies only what's needed into a slim final image. The container runs as a non-root user. On merge to `main`, GitHub Actions automatically builds and pushes the image to GitHub Container Registry.
 
 ---
 
 ## Code structure
 
-Each file has a single, clearly defined role. Files in higher layers only import from lower layers, never sideways or upward. This one-way dependency flow means changes have predictable blast radius.
+Each file has one clearly defined role. Files in higher layers only import from lower layers, never sideways or upward. This one-way dependency flow keeps changes predictable.
 
 ```mermaid
 flowchart TD
-    subgraph infra["Infrastructure (not Python source)"]
+    classDef infra fill:#f1f5f9,stroke:#64748b,color:#1e293b,stroke-width:1px
+    classDef entry fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px
+    classDef logic fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:1px
+    classDef data  fill:#fef3c7,stroke:#d97706,color:#78350f,stroke-width:1px
+    classDef cfg   fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:1px
+    classDef found fill:#fef2f2,stroke:#dc2626,color:#7f1d1d,stroke-width:1px
+
+    subgraph infra_g["Infrastructure (not Python source)"]
         direction LR
-        E[".env\nenv vars"] & M["Makefile\nshortcuts"] & D["docker-compose.yml\nlocal Postgres"] & DF["Dockerfile\ncontainer image"] & CI[".github/workflows/ci.yml\nCI pipeline"]
+        E[".env\nenv vars"]:::infra
+        MK["Makefile\nshortcuts"]:::infra
+        DC["docker-compose.yml\nlocal Postgres"]:::infra
+        DF["Dockerfile\ncontainer image"]:::infra
+        CI[".github/workflows/\nCI pipeline"]:::infra
     end
 
     subgraph l5["Layer 5 — Entry Point"]
-        MAIN["main.py\nparses CLI · loads config · opens DB · delegates"]
+        MAIN["main.py\nParses CLI args\nLoads and validates all config\nOpens DB connection\nDelegates to the right class"]:::entry
     end
 
-    subgraph l4["Layer 4 — Business Logic\n(imports from layers below only)"]
-        SEED["seed.py\nSeeder\n2 yrs historical data"]
-        SIM["simulate.py\nSimulator\nlive traffic loop"]
-        SCH["schema.py\nDDL SQL strings\nCREATE · DROP · REPLICA IDENTITY"]
+    subgraph l4["Layer 4 — Business Logic"]
+        SEED["seed.py\nSeeder\n2 years of historical data"]:::logic
+        SIM["simulate.py\nSimulator\nLive traffic loop"]:::logic
+        SCH["schema.py\nDDL SQL strings\nCREATE, DROP, REPLICA IDENTITY"]:::logic
     end
 
-    subgraph l3["Layer 3 — Database + Models"]
-        DB["db.py\nDatabaseManager\nconnect · retry · cursor · execute · fetch"]
-        MOD["models.py\nCustomer · Product\nOrder · OrderItem\nPayment · Shipment"]
+    subgraph l3["Layer 3 — Database and Models"]
+        DB["db.py\nDatabaseManager\nConnect, retry, cursor,\nexecute, fetch"]:::data
+        MOD["models.py\nCustomer, Product\nOrder, OrderItem\nPayment, Shipment"]:::data
     end
 
     subgraph l2["Layer 2 — Configuration"]
-        CFG["config.py\nOrderStatus · PaymentMethod · Carrier · ProductCategory\nDatabaseConfig · SeedConfig · SimulationConfig · RetryConfig"]
+        CFG["config.py\nOrderStatus, PaymentMethod,\nCarrier, ProductCategory\nDatabaseConfig, SeedConfig,\nSimulationConfig, RetryConfig"]:::cfg
     end
 
-    subgraph l1["Layer 1 — Foundation\n(no imports from above)"]
-        EXC["exceptions.py\nSimulatorError · ConfigurationError\nDatabaseConnectionError · SchemaError\nSeedError · SimulationError"]
+    subgraph l1["Layer 1 — Foundation"]
+        EXC["exceptions.py\nSimulatorError\nConfigurationError\nDatabaseConnectionError\nSchemaError, SeedError\nSimulationError"]:::found
     end
 
-    E -->|load_dotenv reads env vars| CFG
-    M -->|runs python main.py| MAIN
-    DF -->|installs packages for| MAIN
+    E  -->|"load_dotenv reads env vars"| CFG
+    MK -->|"runs python main.py"| MAIN
 
-    MAIN -->|delegates to| SEED & SIM & SCH & DB & CFG
+    MAIN --> SEED & SIM & SCH & DB & CFG
 
-    SEED -->|writes rows via| DB
-    SEED -->|creates row objects via| MOD
-    SIM  -->|writes rows via| DB
-    SIM  -->|creates row objects via| MOD
+    SEED --> DB & MOD
+    SIM  --> DB & MOD
 
-    DB  -->|reads connection config from| CFG
-    MOD -->|reads domain constants from| CFG
-    CFG -->|raises on bad config| EXC
+    DB  --> CFG
+    MOD --> CFG
+    CFG --> EXC
 ```
 
 **What each file does:**
 
 | File | Role |
 |---|---|
-| `main.py` | CLI entry point. Parses `schema / seed / simulate / reset`, loads and validates all config before opening a DB connection, then calls the right class. The only file that touches every layer. |
-| `simulator/config.py` | Domain constants (`OrderStatus`, `PaymentMethod`, `Carrier`, etc.) and frozen config dataclasses. `ENVIRONMENT` drives record limits automatically, so there are no hardcoded numbers to change when switching environments. |
-| `simulator/db.py` | `DatabaseManager` wraps psycopg2. Handles connect with exponential-backoff retry, a `cursor()` context manager that auto-commits on success and rolls back on any failure, and helper methods for bulk inserts and reads. |
-| `simulator/models.py` | Dataclasses for each table (`Customer`, `Product`, `Order`, `OrderItem`, `Payment`, `Shipment`). Each has a `generate()` factory using Faker and an `as_insert_tuple()` method that matches the INSERT column order. |
-| `simulator/schema.py` | Pure SQL DDL strings: CREATE TABLE, indexes, `updated_at` triggers, `REPLICA IDENTITY FULL`, and DROP TABLE. No Python logic, just SQL kept in one place. |
-| `simulator/seed.py` | `Seeder` class. Inserts customers and products first, then creates historical orders with realistic lifecycle distributions (most old orders delivered, a fraction cancelled or refunded, recent ones still in transit). Raises `SeedError` on any failure. Never partial. |
-| `simulator/simulate.py` | `Simulator` class. Runs the continuous tick loop: new orders, status advances, shipment tracking, cancellations, refunds, organic customer sign-ups. `DatabaseConnectionError` triggers a reconnect; all other errors crash loudly. |
-| `simulator/exceptions.py` | Exception hierarchy rooted at `SimulatorError`. Named exceptions mean callers catch exactly what they expect and everything else crashes with context. |
-| `tests/conftest.py` | Shared pytest fixtures. The `db` fixture uses `TEST_DB_NAME` (not `DB_NAME`) and creates + drops the schema around each test, so tests never touch simulator data. |
+| `main.py` | CLI entry point. Parses `schema / seed / simulate / reset`, validates all config before opening a DB connection, then calls the right class. The only file that touches every layer. |
+| `simulator/config.py` | Domain constants (`OrderStatus`, `PaymentMethod`, `Carrier`, etc.) and frozen config dataclasses. `ENVIRONMENT` drives record limits automatically. |
+| `simulator/db.py` | `DatabaseManager` wraps psycopg2. Handles connect with exponential-backoff retry, a `cursor()` context manager that auto-commits on success and rolls back on failure, and helpers for bulk inserts and reads. |
+| `simulator/models.py` | Dataclasses for each table. Each has a `generate()` factory using Faker and an `as_insert_tuple()` method that matches the INSERT column order. |
+| `simulator/schema.py` | Pure SQL DDL strings: CREATE TABLE, indexes, `updated_at` triggers, `REPLICA IDENTITY FULL`, and DROP TABLE. No Python logic. |
+| `simulator/seed.py` | `Seeder` class. Inserts customers and products first, then creates historical orders with realistic lifecycle distributions. Raises `SeedError` on any failure. Never partial. |
+| `simulator/simulate.py` | `Simulator` class. Runs the continuous tick loop. `DatabaseConnectionError` triggers a reconnect; all other errors crash loudly so nothing fails silently. |
+| `simulator/exceptions.py` | Exception hierarchy rooted at `SimulatorError`. Named exceptions mean callers catch exactly what they expect and everything else surfaces with full context. |
+| `tests/conftest.py` | Shared pytest fixtures. The `db` fixture uses `TEST_DB_NAME` and creates and drops the schema around each test, so tests never touch simulator data. |
 
 ---
 
@@ -518,80 +748,15 @@ flowchart TD
 
 CI skips runs triggered by README or `.env.example` changes. Only source code, configuration, and Dockerfile changes trigger the pipeline.
 
-### On every pull request and push to main
+**On every pull request and push to main**, four jobs run in two waves:
 
-Four jobs run in two waves:
+Wave 1 (parallel, no database needed): lint and type check (ruff + mypy), unit tests.
 
-**Wave 1 (parallel):**
+Wave 2 (only if wave 1 passes, parallel): integration tests against a GitHub-provisioned PostgreSQL service container, Docker build verification.
 
-| Job | What it checks |
-|---|---|
-| Lint and type check | ruff (style) + mypy (types) on `simulator/` and `main.py` |
-| Unit tests | pytest unit tests with coverage report (no database needed) |
+**On merge to main**, the deploy workflow builds the Docker image and pushes it to GitHub Container Registry (GHCR) tagged as `dev` and `dev-{sha}`. Authentication uses the built-in `GITHUB_TOKEN`, no AWS credentials needed.
 
-**Wave 2 (only if wave 1 passes, parallel):**
-
-| Job | What it checks |
-|---|---|
-| Integration tests | pytest integration tests against a real PostgreSQL service container that GitHub provisions automatically |
-| Docker build | Verifies the Dockerfile builds cleanly (no push in CI) |
-
-### On merge to main
-
-The deploy workflow triggers automatically after CI passes. It builds the Docker image and pushes it to GitHub Container Registry (GHCR) tagged as `dev` and `dev-{sha}`. No AWS credentials are needed, it authenticates using the built-in `GITHUB_TOKEN`.
-
-### Promotion to staging and prod
-
-Trigger the Deploy workflow manually from GitHub Actions, choose the target environment. The image is rebuilt and pushed with the matching environment tag (`staging`, `prod`). The `prod` push also updates the `latest` tag. GitHub Environment protection rules require reviewer approval for staging and prod before the job runs.
-
----
-
-## How the tests work
-
-Most test suites load sample data from CSV files. I didn't do that here, and it's worth explaining why.
-
-A CSV is static. The moment the database schema changes, the CSV goes out of date and the tests start lying: they pass even when the real code would fail. Instead, the tests create the actual PostgreSQL schema from scratch before each test and destroy it afterwards. The schema itself becomes the test environment.
-
-There are two layers of tests.
-
-**Unit tests** check individual pieces of logic in isolation. They run entirely in Python with no database, no Docker, and no AWS. If a test checks that the `Customer` model generates a valid insert tuple, it just calls the Python function and inspects the result. These run in under a second.
-
-**Integration tests** check that the application works against a real PostgreSQL database. GitHub Actions spins up a PostgreSQL service container automatically alongside the CI runner. The test creates the full schema, runs the application code, checks the result, then drops everything. Each test starts with a completely clean slate.
-
-```mermaid
-flowchart TD
-    A[Push to GitHub] -->|triggers CI| B[Wave 1: fast checks run in parallel\nno database needed]
-    B --> C[Lint and type check\nruff + mypy]
-    B --> D[Unit tests\nPure Python, no database needed]
-    C --> E{Both pass?}
-    D --> E
-    E -->|No — fix before wave 2| F[Pipeline stops here\nno point running database tests\nif the code has style or type errors]
-    E -->|Yes — safe to test against real DB| G[Wave 2: slower checks run in parallel]
-    G --> H[Integration tests\nGitHub spins up a real\nPostgreSQL container automatically\nTests create + drop schema each run]
-    G --> I[Docker build\nVerifies image builds cleanly\nno push yet]
-    H --> J{Both pass?}
-    I --> J
-    J -->|Yes — all checks green| K[Deploy workflow triggers\nBuilds image and pushes to GHCR\ntagged dev and dev-sha]
-    J -->|No — test or build failure| L[Pipeline stops here\nDeploy is blocked]
-```
-
-The integration tests connect to a separate database called `ecommerce_test`, never the main `ecommerce` database. Running the full test suite can never touch or corrupt real simulator data.
-
----
-
-## How DMS reads this data
-
-AWS DMS connects to PostgreSQL as a replication client and subscribes to the WAL stream. For each change the simulator writes, DMS produces a Parquet file in the Bronze S3 bucket partitioned by date:
-
-```
-s3://edp-dev-{account-id}-bronze/raw/
-└── customers/
-    └── 20240115/
-        ├── LOAD00000001.parquet        ← full table snapshot (first run)
-        └── 20240115-102301-0001.parquet ← CDC events (inserts, updates, deletes)
-```
-
-The Bronze layer is append-only. The Glue PySpark jobs in `platform-glue-jobs` read these files, resolve the CDC operations, and write a clean deduplicated Silver layer.
+**Promotion to staging and prod**: trigger the Deploy workflow manually, choose the target environment. The `prod` push also updates the `latest` tag. GitHub Environment protection rules require reviewer approval for staging and prod.
 
 ---
 
