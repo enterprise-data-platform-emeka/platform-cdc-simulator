@@ -13,8 +13,9 @@ A realistic e-commerce OLTP (Online Transaction Processing) data generator. It w
 ## Contents
 
 - [Before you start: Understanding CDC, WAL, and DMS](#before-you-start-understanding-cdc-wal-and-dms)
-- [Beginner glossary](#beginner-glossary)
+- [Glossary](#glossary)
 - [How this repository connects to the platform](#how-this-repository-connects-to-the-platform)
+- [Where each part is implemented](#where-each-part-is-implemented)
 - [What lands in Bronze S3](#what-lands-in-bronze-s3)
 - [What the simulator does](#what-the-simulator-does)
 - [Data model](#data-model)
@@ -33,7 +34,7 @@ A realistic e-commerce OLTP (Online Transaction Processing) data generator. It w
 
 ## Before you start: Understanding CDC, WAL, and DMS
 
-If you're new to data engineering, three concepts in this project might not be obvious: CDC (Change Data Capture), WAL (Write-Ahead Log), and DMS. Understanding them makes everything else in the platform click into place.
+Three concepts drive this repository: CDC (Change Data Capture), WAL (Write-Ahead Log), and DMS (Database Migration Service). Once those are clear, the rest of the platform becomes much easier to follow.
 
 ### The problem: how do you keep a data warehouse in sync with a live database?
 
@@ -43,9 +44,9 @@ The obvious approach is **polling**: every hour, run a query like `SELECT * FROM
 
 **CDC is the better approach.** Instead of querying, you subscribe to the database's own internal change log. Every change that happens in the database is recorded in that log before it's even written to the tables. You read the log and you get every change, in order, with nothing missed.
 
-The simplest way to understand CDC is to compare it with polling:
+The clearest way to understand CDC is to compare it with polling:
 
-| Approach | How it works | Beginner-friendly summary |
+| Approach | How it works | What to remember |
 |---|---|---|
 | Polling | A scheduled job repeatedly runs `SELECT * FROM table WHERE updated_at > last_run_time`. | Easy to start, but it can miss deletes, miss intermediate updates, and put load on the live database. |
 | CDC | A replication reader subscribes to the database change log and receives every insert, update, and delete. | More reliable for pipelines because it follows the same stream the database uses for replication and recovery. |
@@ -99,19 +100,53 @@ sequenceDiagram
     DMS->>S3: Write timestamped CDC Parquet files
 ```
 
-## Beginner glossary
+## Glossary
 
 | Term | Meaning in this project |
 |---|---|
 | CDC (Change Data Capture) | Capturing row-level database changes as events instead of repeatedly querying tables. |
 | WAL (Write-Ahead Log) | PostgreSQL's internal log of changes. PostgreSQL writes here before the table data is finalized. |
 | DMS (Database Migration Service) | The AWS service that reads PostgreSQL changes and writes them to S3. |
+| PostgreSQL | The source relational database that stores the e-commerce tables. Locally it runs in Docker; in AWS it runs as RDS. |
+| RDS (Relational Database Service) | AWS-managed PostgreSQL. AWS operates the database server; this project creates the schema and writes data into it. |
+| S3 (Simple Storage Service) | AWS object storage. DMS writes raw Parquet objects into the Bronze bucket. |
 | Full Load | The first snapshot DMS takes: every existing row is copied once. |
 | CDC stream | The continuous phase after Full Load: every new insert, update, and delete is copied. |
 | Bronze S3 | The raw, append-only landing zone. It stores what DMS wrote, without cleaning or deduplicating it. |
 | Silver | The cleaned layer created later by Glue. It keeps the latest valid version of each entity. |
+| Glue PySpark | AWS Glue runs Apache Spark jobs. In this platform, Glue reads Bronze Parquet files and writes clean Silver tables. |
+| Apache Spark | Distributed data processing engine used by Glue to process many Parquet files in parallel. |
+| dbt (data build tool) | SQL transformation framework used later to build Gold analytics tables from Silver data. |
+| Athena | AWS query service that runs SQL directly against files in S3. |
+| Analytics Agent | The downstream application that turns plain-English questions into SQL queries and charts. |
 | `op` column | A DMS column that says what happened: `I` for insert, `U` for update, `D` for delete. |
 | Parquet | A columnar file format used for efficient analytics queries on S3. |
+| OLTP (Online Transaction Processing) | A database workload with many small business transactions, such as creating orders and updating payments. |
+| SSM (Systems Manager) Session Manager | AWS service used here to open a private tunnel from a laptop to RDS without exposing the database to the internet. |
+| Terraform | Infrastructure-as-code tool used in the infrastructure repo to create AWS resources such as RDS, DMS, and S3 buckets. |
+| `psycopg2` | Python PostgreSQL driver used by this simulator to execute SQL statements. |
+| CLI (Command Line Interface) | The terminal entry point in `main.py`; commands such as `schema`, `seed`, and `simulate` call the underlying Python classes. |
+| SQL (Structured Query Language) | Language used to create tables and insert, update, delete, or query rows in PostgreSQL. |
+| Trigger | PostgreSQL function that runs automatically when a table event happens. Here it keeps `updated_at` fresh on every UPDATE. |
+| Primary key | Column that uniquely identifies one row, such as `order_id` in `orders`. |
+| Foreign key | Column that links one table to another, such as `orders.customer_id` pointing to `customers.customer_id`. |
+| Docker | Container tool used here to run a local PostgreSQL database without installing PostgreSQL directly on the machine. |
+| pyenv | Local Python version manager. The repo uses it to pin Python 3.11.8. |
+| virtual environment (`.venv`) | Isolated Python package environment so this repo's dependencies do not conflict with other projects. |
+| environment variable | Named value read by the program at runtime, such as `DB_HOST` or `ENVIRONMENT`. |
+| `.env` file | Local file containing environment variables for development. It is ignored by git so secrets are not committed. |
+| AWS CLI | Command-line tool for calling AWS services from the terminal. |
+| Git | Version-control tool used to track code changes. |
+| Homebrew | macOS package manager used in this README to install tools such as pyenv and the SSM plugin. |
+| Faker | Python library used to generate realistic fake names, emails, products, and order data. |
+| pytest | Python test framework used by this repo's unit and integration tests. |
+| ruff | Python linter used to catch style and common code issues. |
+| mypy | Python type checker used to catch type-related mistakes before runtime. |
+| GitHub Actions | GitHub's CI/CD system. It runs tests, linting, type checks, and Docker builds automatically. |
+| CI/CD (Continuous Integration / Continuous Delivery) | Automated checks and delivery steps that run when code changes. |
+| GHCR (GitHub Container Registry) | GitHub service used to store built Docker images. |
+| KMS (Key Management Service) | AWS encryption-key service used by the infrastructure repo for protected secrets and storage. |
+| Quarantine | S3 location for invalid rows that fail validation in downstream Glue jobs, so bad data is separated instead of silently dropped. |
 
 ---
 
@@ -178,6 +213,30 @@ flowchart TB
 
 ---
 
+## Where each part is implemented
+
+Some parts of the CDC flow are implemented in this repository. Other parts are managed by PostgreSQL or by Terraform in the infrastructure repository.
+
+| Platform part | What owns it | Where to inspect it |
+|---|---|---|
+| CLI commands (`schema`, `seed`, `simulate`, `reset`) | This repo. The CLI validates configuration, opens the database connection, and calls the correct implementation class. | [`main.py`](main.py) |
+| PostgreSQL connection and transactions | This repo. `DatabaseManager` opens the `psycopg2` connection, commits successful writes, rolls back failed writes, and retries lost connections. | [`simulator/db.py`](simulator/db.py) |
+| Table creation | This repo. The six e-commerce tables, indexes, `updated_at` trigger, and `REPLICA IDENTITY FULL` settings are SQL strings. | [`simulator/schema.py`](simulator/schema.py) |
+| `REPLICA IDENTITY FULL` | This repo applies it; PostgreSQL enforces it. The SQL tells PostgreSQL to include the full row image for UPDATE and DELETE changes in the replication log. | [`simulator/schema.py`](simulator/schema.py) |
+| Historical source data | This repo. The seeder inserts customers, products, orders, order items, payments, and shipments so DMS has a first snapshot to copy. | [`simulator/seed.py`](simulator/seed.py) |
+| Live INSERT and UPDATE events | This repo. The simulator continuously inserts new customers/orders/payments/shipments and updates order, payment, shipment, and product rows. | [`simulator/simulate.py`](simulator/simulate.py) |
+| Physical DELETE events | DMS supports them, but this simulator currently models cancellations and refunds as status updates instead of SQL `DELETE` statements. | [`simulator/simulate.py`](simulator/simulate.py) |
+| WAL (Write-Ahead Log) | PostgreSQL owns this. The code does not write to the WAL directly; every committed SQL write automatically lands there. | Writes go through [`simulator/db.py`](simulator/db.py); WAL settings for AWS RDS are in [`terraform-platform-infra-live/modules/ingestion/main.tf`](https://github.com/enterprise-data-platform-emeka/terraform-platform-infra-live/blob/main/modules/ingestion/main.tf). |
+| AWS RDS PostgreSQL | Terraform owns the cloud database. This repo connects to it and writes data. | [`terraform-platform-infra-live/modules/ingestion/main.tf`](https://github.com/enterprise-data-platform-emeka/terraform-platform-infra-live/blob/main/modules/ingestion/main.tf) |
+| AWS DMS replication instance, endpoints, and task | Terraform owns DMS. This repo does not run DMS; it only creates source changes for DMS to read. | [`terraform-platform-infra-live/modules/ingestion/main.tf`](https://github.com/enterprise-data-platform-emeka/terraform-platform-infra-live/blob/main/modules/ingestion/main.tf) |
+| Bronze S3 bucket | Terraform owns the bucket. DMS writes raw Parquet files into it. | [`terraform-platform-infra-live/modules/data-lake/main.tf`](https://github.com/enterprise-data-platform-emeka/terraform-platform-infra-live/blob/main/modules/data-lake/main.tf) |
+| Bronze-to-Silver reconciliation | The downstream Glue jobs own this. They read all Bronze files, sort records by `_dms_timestamp`, keep the latest row for each primary key, and drop rows whose latest operation is `D`. | [`platform-glue-jobs/lib/cdc.py`](https://github.com/enterprise-data-platform-emeka/platform-glue-jobs/blob/main/lib/cdc.py) |
+| SSM tunnel to private RDS | Terraform creates the private networking and bastion path; the Makefile uses environment-specific settings when you run against AWS. | [`Makefile`](Makefile), [`terraform-platform-infra-live/environments/dev/main.tf`](https://github.com/enterprise-data-platform-emeka/terraform-platform-infra-live/blob/main/environments/dev/main.tf) |
+
+The important boundary is this: this repository creates the PostgreSQL schema and writes realistic business transactions. PostgreSQL records those transactions in the WAL. AWS DMS, created by Terraform, reads the WAL and writes the Bronze S3 files.
+
+---
+
 ## What lands in Bronze S3
 
 This is the key concept to understand before working with the rest of the platform.
@@ -210,8 +269,10 @@ This is why Bronze is called "raw": it contains every event, not just the curren
 
 The `op` column values are:
 - `I` — an INSERT (a new row was created)
-- `U` — an UPDATE (an existing row was changed; DMS captures the full row after the change)
+- `U` — an UPDATE (an existing row was changed; DMS writes the changed row as a CDC record)
 - `D` — a DELETE (a row was removed; DMS captures the last known row before deletion)
+
+This simulator mostly produces `I` and `U` records. Cancellations and refunds are represented as status changes, so they are UPDATE events. The `D` explanation is included because AWS DMS supports delete events and the downstream Silver reconciliation logic must know how to handle them.
 
 For one order, Bronze might look like this:
 
@@ -304,9 +365,59 @@ Terminal states (no further transitions): `delivered`, `cancelled`, `refunded`
 
 **Why `REPLICA IDENTITY FULL`?**
 
-By default, PostgreSQL only writes the **changed columns** to the WAL on an UPDATE. For example, if only the `order_status` column changes, the WAL entry only contains `order_status`. DMS can't build a complete Parquet row from just one column.
+`REPLICA IDENTITY` controls how much row information PostgreSQL writes into the WAL for UPDATE and DELETE operations. `FULL` means "include the full row context, not just the minimum identifier and changed values."
 
-Setting `REPLICA IDENTITY FULL` tells PostgreSQL to write the **entire row** to the WAL on every UPDATE, not just what changed. DMS can then produce a complete Parquet record for every event.
+For example, imagine this row exists in `orders`:
+
+| `order_id` | `customer_id` | `order_status` | `order_date` |
+|---:|---:|---|---|
+| `123` | `42` | `pending` | `2026-05-04 10:00:00` |
+
+Then the simulator runs this UPDATE:
+
+```sql
+UPDATE orders
+SET order_status = 'delivered'
+WHERE order_id = 123;
+```
+
+Without `REPLICA IDENTITY FULL`, the WAL may only contain the row identifier plus the changed value:
+
+```text
+order_id = 123
+order_status = delivered
+```
+
+That is enough for PostgreSQL replication to identify the row, but it is not enough for this data lake design. DMS needs to write a complete CDC record into Bronze S3 so downstream Glue jobs can rebuild the latest row without constantly querying the source database.
+
+With `REPLICA IDENTITY FULL`, the WAL contains enough row context for DMS to produce a complete CDC record:
+
+```text
+order_id = 123
+customer_id = 42
+order_status = delivered
+order_date = 2026-05-04 10:00:00
+```
+
+DMS can now write a complete Bronze record instead of a partial "only the changed column" record:
+
+| `order_id` | `customer_id` | `order_status` | `order_date` | `op` |
+|---:|---:|---|---|---|
+| `123` | `42` | `delivered` | `2026-05-04 10:00:00` | `U` |
+
+DELETE events need this even more. If the latest Bronze record for an order is a delete, Glue must know which business key was deleted so it can remove that entity from Silver:
+
+| `order_id` | `customer_id` | `order_status` | `op` |
+|---:|---:|---|---|
+| `123` | `42` | `delivered` | `D` |
+
+In this repo, the setting is applied in [`simulator/schema.py`](simulator/schema.py):
+
+```sql
+ALTER TABLE orders REPLICA IDENTITY FULL;
+```
+
+The same setting is applied to all six source tables so DMS receives complete UPDATE and DELETE events for customers, products, orders, order items, payments, and shipments.
 
 ---
 
