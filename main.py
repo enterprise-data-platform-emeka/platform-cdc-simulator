@@ -2,22 +2,26 @@
 CDC Simulator: CLI entry point.
 
 Commands:
+    bootstrap   Idempotently create the schema and seed historical data only
+                when the source database is empty. Safe for promoted workflows.
     schema      Create all tables, indexes, triggers, and set REPLICA IDENTITY FULL.
                 Safe to run on an empty database. Fails loudly if tables already exist
                 and the schema differs. Use reset to start fresh.
     seed        Populate the database with historical data. The amount of data
                 seeded depends on the ENVIRONMENT variable (dev/staging/prod).
-    simulate    Start the live simulation loop. Runs until Ctrl+C.
+    simulate    Start the live simulation loop. Runs until Ctrl+C or the optional
+                --duration-seconds value elapses.
                 Respects the per-environment order limit.
     reset       Drop all tables, recreate the schema, then reseed.
                 WARNING: destroys all existing data.
 
 Usage:
+    python main.py bootstrap
     python main.py schema
     python main.py seed
     python main.py simulate
     python main.py reset
-    python main.py simulate --log-level DEBUG
+    python main.py simulate --duration-seconds 600 --log-level DEBUG
 
 Environment variables:
     ENVIRONMENT   dev | staging | prod  (required, drives record limits)
@@ -45,7 +49,7 @@ from simulator.config import (
     get_environment_limits,
 )
 from simulator.db import DatabaseManager
-from simulator.exceptions import ConfigurationError, SchemaError, SeedError, SimulatorError
+from simulator.exceptions import ConfigurationError, SchemaError, SimulatorError
 from simulator.schema import ALL_CREATE_STATEMENTS, ALL_DROP_STATEMENTS
 from simulator.seed import Seeder
 from simulator.simulate import Simulator
@@ -74,10 +78,55 @@ def cmd_seed(db: DatabaseManager, seed_config: SeedConfig) -> None:
     seeder.run()
 
 
-def cmd_simulate(db: DatabaseManager, sim_config: SimulationConfig) -> None:
+def _table_exists(db: DatabaseManager, table_name: str) -> bool:
+    row = db.fetch_one(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+              AND table_name = %s
+        )
+        """,
+        (table_name,),
+    )
+    return bool(row and row[0])
+
+
+def cmd_bootstrap(db: DatabaseManager, seed_config: SeedConfig) -> None:
+    """
+    Idempotently prepare an empty source database.
+
+    This is the command CI/CD should use. It creates the schema when tables do
+    not exist and seeds only when the core customer table is empty. It never
+    drops existing data.
+    """
+    if not _table_exists(db, "customers"):
+        logger.info("No source schema detected — creating schema")
+        cmd_schema(db)
+    else:
+        logger.info("Source schema already exists — leaving it in place")
+
+    row = db.fetch_one("SELECT COUNT(*) FROM customers")
+    customer_count = int(row[0]) if row else 0
+    if customer_count == 0:
+        logger.info("Source tables are empty — seeding historical data")
+        cmd_seed(db, seed_config)
+    else:
+        logger.info(
+            "Source tables already contain %d customers — skipping seed",
+            customer_count,
+        )
+
+
+def cmd_simulate(
+    db: DatabaseManager,
+    sim_config: SimulationConfig,
+    duration_seconds: int | None = None,
+) -> None:
     """Run the live simulation loop (blocks until Ctrl+C or unrecoverable error)."""
     sim = Simulator(db, sim_config)
-    sim.run()
+    sim.run(duration_seconds=duration_seconds)
 
 
 def cmd_reset(db: DatabaseManager, seed_config: SeedConfig) -> None:
@@ -107,8 +156,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "command",
-        choices=["schema", "seed", "simulate", "reset"],
+        choices=["bootstrap", "schema", "seed", "simulate", "reset"],
         help=(
+            "bootstrap: create schema and seed only when empty. "
             "schema: create tables. "
             "seed: populate historical data. "
             "simulate: run live traffic loop. "
@@ -120,6 +170,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Log verbosity (default: INFO)",
+    )
+    parser.add_argument(
+        "--duration-seconds",
+        type=int,
+        default=None,
+        help=("Only for simulate: stop after this many seconds. " "Omit to run until interrupted."),
     )
     return parser
 
@@ -156,12 +212,16 @@ def main() -> int:
     try:
         with DatabaseManager(db_config, retry_config) as db:
             command = args.command
-            if command == "schema":
+            if command == "bootstrap":
+                cmd_bootstrap(db, seed_config)
+            elif command == "schema":
                 cmd_schema(db)
             elif command == "seed":
                 cmd_seed(db, seed_config)
             elif command == "simulate":
-                cmd_simulate(db, sim_config)
+                if args.duration_seconds is not None and args.duration_seconds <= 0:
+                    raise ConfigurationError("--duration-seconds must be greater than 0")
+                cmd_simulate(db, sim_config, duration_seconds=args.duration_seconds)
             elif command == "reset":
                 cmd_reset(db, seed_config)
     except SimulatorError as exc:

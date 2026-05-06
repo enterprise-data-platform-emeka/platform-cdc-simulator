@@ -33,7 +33,7 @@ from __future__ import annotations
 import logging
 import random
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta
 
 import psycopg2
 from faker import Faker
@@ -48,7 +48,6 @@ from simulator.db import DatabaseManager
 from simulator.exceptions import DatabaseConnectionError, SimulationError
 from simulator.models import (
     Customer,
-    Order,
     OrderItem,
     Payment,
     Shipment,
@@ -82,7 +81,7 @@ class Simulator:
 
     # ── Public entry point ────────────────────────────────────────────────────
 
-    def run(self) -> None:
+    def run(self, duration_seconds: int | None = None) -> None:
         """
         Start the simulation loop.
 
@@ -90,18 +89,30 @@ class Simulator:
         All other exceptions crash the process. This is intentional.
         Logs a stats summary every 10 ticks.
         """
+        deadline = (
+            datetime.now(tz=UTC) + timedelta(seconds=duration_seconds)
+            if duration_seconds is not None
+            else None
+        )
         logger.info(
             "Simulator starting — environment limit: %d orders, "
-            "%d new orders/tick, %.1fs tick interval",
+            "%d new orders/tick, %.1fs tick interval%s",
             self._config.max_orders,
             self._config.new_orders_per_tick,
             self._config.tick_interval_seconds,
+            f", duration: {duration_seconds}s" if duration_seconds is not None else "",
         )
         # Fetch the current order count so we start with accurate state
         self._refresh_order_count()
 
         try:
             while True:
+                if deadline is not None and datetime.now(tz=UTC) >= deadline:
+                    logger.info(
+                        "Simulator duration elapsed after %d ticks",
+                        self._tick_count,
+                    )
+                    break
                 try:
                     self._tick()
                 except DatabaseConnectionError as exc:
@@ -203,7 +214,7 @@ class Simulator:
             return
 
         customer_id = random.choice(customer_ids)
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
 
         row = self._db.fetch_one(
             "INSERT INTO orders (customer_id, order_date, order_status) "
@@ -252,9 +263,7 @@ class Simulator:
                 payment.as_insert_tuple(),
             )
         except psycopg2.Error as exc:
-            raise SimulationError(
-                f"Failed to insert payment for order {order_id}: {exc}"
-            ) from exc
+            raise SimulationError(f"Failed to insert payment for order {order_id}: {exc}") from exc
 
         logger.debug(
             "New order %d placed for customer %d (total: %.2f)",
@@ -285,7 +294,7 @@ class Simulator:
 
         sample_size = max(1, int(len(rows) * _ADVANCE_RATE))
         to_advance = random.sample(rows, min(sample_size, len(rows)))
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
 
         for order_id, current_status in to_advance:
             next_status = self._next_order_status(current_status)
@@ -307,9 +316,7 @@ class Simulator:
         try:
             idx = OrderStatus.LIFECYCLE.index(current)
         except ValueError:
-            logger.warning(
-                "Order has unrecognised status %r — cannot advance lifecycle", current
-            )
+            logger.warning("Order has unrecognised status %r — cannot advance lifecycle", current)
             return current
         if idx + 1 < len(OrderStatus.LIFECYCLE):
             return OrderStatus.LIFECYCLE[idx + 1]
@@ -330,9 +337,7 @@ class Simulator:
                 shipment.as_insert_tuple(),
             )
         except psycopg2.Error as exc:
-            raise SimulationError(
-                f"Failed to create shipment for order {order_id}: {exc}"
-            ) from exc
+            raise SimulationError(f"Failed to create shipment for order {order_id}: {exc}") from exc
 
     # ── Shipment advancement ──────────────────────────────────────────────────
 
@@ -356,7 +361,7 @@ class Simulator:
 
         sample_size = max(1, int(len(rows) * _ADVANCE_RATE))
         to_advance = random.sample(rows, min(sample_size, len(rows)))
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
 
         for shipment_id, current_status in to_advance:
             next_status = self._next_delivery_status(current_status)
