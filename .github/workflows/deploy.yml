@@ -10,13 +10,12 @@ name: Deploy
 #     prod:    ghcr.io/{repo}:prod, ghcr.io/{repo}:prod-{sha}, ghcr.io/{repo}:latest
 #
 # Triggers:
-#   - CI completes on main  → automatically builds and pushes :dev image
-#   - workflow_dispatch     → manually promotes to staging or prod
+#   - workflow_dispatch → manually builds and pushes the selected environment image
 #
-# Promotion path: dev (auto) → staging (manual) → prod (manual + approval)
+# Promotion path: dev (manual) → staging (manual) → prod (manual + approval)
 #
 # GitHub Environment protection rules enforce the gates:
-#   dev     - no protection, auto-deploys after CI passes
+#   dev     - manual trigger after CI passes
 #   staging - required reviewers before the job runs
 #   prod    - required reviewers + deployment protection rules
 #
@@ -24,31 +23,19 @@ name: Deploy
 # built-in GITHUB_TOKEN.
 
 on:
-  # Triggers only after CI completes successfully on main.
-  # This ensures tests and Docker build pass before any image is pushed.
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
-    branches: [main]
-
-  # Manual trigger for promoting to staging or prod.
   workflow_dispatch:
     inputs:
       environment:
         description: "Target environment"
         required: true
         type: choice
-        options: [staging, prod]
+        options: [dev, staging, prod]
 
 jobs:
   deploy:
     name: Deploy to ${{ inputs.environment || 'dev' }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment || 'dev' }}
-
-    # When triggered by workflow_run, only proceed if CI actually passed.
-    # workflow_dispatch bypasses this check, manual deploys are intentional.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     permissions:
       contents: read
@@ -74,12 +61,9 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Resolve commit SHA
-        # For workflow_run triggers, the SHA is on the triggering workflow's
-        # head commit. For workflow_dispatch, use the current SHA.
         id: sha
         run: |
-          SHA=${{ github.event.workflow_run.head_sha || github.sha }}
-          echo "value=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "value=${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push image
         uses: docker/build-push-action@v5

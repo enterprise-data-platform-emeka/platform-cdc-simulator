@@ -865,7 +865,7 @@ Wave 1 (parallel, no database needed): lint and type check (ruff + mypy), unit t
 
 Wave 2 (only if wave 1 passes, parallel): integration tests against a GitHub-provisioned PostgreSQL service container, Docker build verification.
 
-**On merge to main**, the deploy workflow builds the Docker image and pushes it to GitHub Container Registry (GHCR) tagged as `dev` and `dev-{sha}`. Authentication uses the built-in `GITHUB_TOKEN`, no AWS credentials needed.
+**After CI passes on main**, trigger the deploy workflow manually to build the Docker image and push it to GitHub Container Registry (GHCR) tagged for the selected environment. Authentication uses the built-in `GITHUB_TOKEN`, no AWS credentials needed.
 
 **Promotion to staging and prod**: trigger the Deploy workflow manually, choose the target environment. The `prod` push also updates the `latest` tag. GitHub Environment protection rules require reviewer approval for staging and prod.
 
