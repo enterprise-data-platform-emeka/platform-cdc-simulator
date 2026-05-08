@@ -40,7 +40,6 @@ jobs:
               - 'Makefile'
               - 'requirements*.txt'
               - 'pyproject.toml'
-              - '.github/workflows/**'
 
   # ── Lint and type check ─────────────────────────────────────────────────────
   quality:
