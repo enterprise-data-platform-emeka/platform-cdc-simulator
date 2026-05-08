@@ -24,18 +24,15 @@ from simulator.config import (
     DatabaseConfig,
     DeliveryStatus,
     Environment,
-    EnvironmentLimits,
     OrderStatus,
     PaymentMethod,
     ProductCategory,
-    RetryConfig,
     SeedConfig,
     SimulationConfig,
     get_environment,
     get_environment_limits,
 )
 from simulator.exceptions import ConfigurationError
-
 
 # ── OrderStatus ───────────────────────────────────────────────────────────────
 
@@ -102,9 +99,9 @@ class TestProductCategory:
 
     def test_every_category_has_price_range(self):
         for category in ProductCategory.ALL:
-            assert category in CATEGORY_PRICE_RANGE, (
-                f"Category {category!r} has no price range in CATEGORY_PRICE_RANGE"
-            )
+            assert (
+                category in CATEGORY_PRICE_RANGE
+            ), f"Category {category!r} has no price range in CATEGORY_PRICE_RANGE"
 
     def test_price_ranges_are_positive_and_ordered(self):
         for category, (lo, hi) in CATEGORY_PRICE_RANGE.items():
@@ -248,9 +245,12 @@ class TestDatabaseConfig:
 
 class TestSeedConfig:
     def test_uses_environment_defaults_when_no_env_vars(self, dev_limits):
-        env = {k: v for k, v in os.environ.items()
-               if k not in ("SEED_CUSTOMERS", "SEED_PRODUCTS",
-                            "SEED_HISTORICAL_ORDERS", "SEED_RANDOM_SEED")}
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k
+            not in ("SEED_CUSTOMERS", "SEED_PRODUCTS", "SEED_HISTORICAL_ORDERS", "SEED_RANDOM_SEED")
+        }
         with patch.dict(os.environ, env, clear=True):
             cfg = SeedConfig.from_env(dev_limits)
         assert cfg.num_customers == dev_limits.seed_customers

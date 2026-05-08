@@ -15,12 +15,11 @@ so these tests always run there.
 
 from __future__ import annotations
 
-import pytest
 import psycopg2
+import pytest
 
 from simulator.db import DatabaseManager
 from simulator.exceptions import DatabaseConnectionError
-
 
 # ── Basic connectivity ─────────────────────────────────────────────────────────
 
@@ -41,6 +40,7 @@ class TestDatabaseManagerConnect:
 
     def test_invalid_host_raises_database_connection_error(self, retry_config):
         from simulator.config import DatabaseConfig
+
         bad_config = DatabaseConfig(
             host="nonexistent-host-that-does-not-exist",
             port=5432,
@@ -127,8 +127,9 @@ class TestFetchHelpers:
 
     def test_fetch_one_returns_tuple(self, db):
         self._seed_customer(db)
-        row = db.fetch_one("SELECT first_name FROM customers WHERE email = %s",
-                           ("fetch.test@example.com",))
+        row = db.fetch_one(
+            "SELECT first_name FROM customers WHERE email = %s", ("fetch.test@example.com",)
+        )
         assert row is not None
         assert row[0] == "Fetch"
 
@@ -179,6 +180,6 @@ class TestTransactionRollback:
                 cur.execute("THIS IS NOT VALID SQL AND WILL FAIL")
 
         count_after = db.fetch_one("SELECT COUNT(*) FROM customers")[0]
-        assert count_after == count_before, (
-            "Row count changed after a failed transaction — rollback did not work"
-        )
+        assert (
+            count_after == count_before
+        ), "Row count changed after a failed transaction — rollback did not work"

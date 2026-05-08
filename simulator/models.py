@@ -23,18 +23,15 @@ from __future__ import annotations
 import random
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from faker import Faker
 
 from simulator.config import (
-    CANCELLATION_RATE,
     CATEGORY_PRICE_RANGE,
     CUSTOMER_COUNTRIES,
     CUSTOMER_COUNTRY_WEIGHTS,
     MAX_ITEMS_PER_ORDER,
-    REFUND_RATE,
     Carrier,
     DeliveryStatus,
     OrderStatus,
@@ -71,13 +68,14 @@ class Customer:
     signup_date: datetime
 
     @classmethod
-    def generate(cls, fake: Faker, signup_date: Optional[datetime] = None) -> Customer:
+    def generate(cls, fake: Faker, signup_date: datetime | None = None) -> Customer:
         first = fake.first_name()
         last = fake.last_name()
         # Build a realistic email from the name rather than using fake.email()
         # which produces obviously fake domains.
-        domain = random.choice(["gmail.com", "outlook.com", "yahoo.com",
-                                "hotmail.com", "icloud.com", "proton.me"])
+        domain = random.choice(
+            ["gmail.com", "outlook.com", "yahoo.com", "hotmail.com", "icloud.com", "proton.me"]
+        )
         # secrets.token_hex(4) gives 8 hex characters (4 billion possibilities).
         # This guarantees uniqueness even at prod scale (15,000 customers).
         # A 2-digit suffix added 30% of the time (the previous approach) only
@@ -87,8 +85,7 @@ class Customer:
         country = _weighted_choice(CUSTOMER_COUNTRIES, CUSTOMER_COUNTRY_WEIGHTS)
         phone = fake.phone_number()
         if signup_date is None:
-            signup_date = fake.date_time_between(start_date="-2y", end_date="now",
-                                                  tzinfo=timezone.utc)
+            signup_date = fake.date_time_between(start_date="-2y", end_date="now", tzinfo=UTC)
         return cls(
             first_name=first,
             last_name=last,
@@ -160,11 +157,11 @@ class Order:
     def generate(
         cls,
         customer_id: int,
-        order_date: Optional[datetime] = None,
+        order_date: datetime | None = None,
         order_status: str = OrderStatus.PENDING,
     ) -> Order:
         if order_date is None:
-            order_date = datetime.now(tz=timezone.utc)
+            order_date = datetime.now(tz=UTC)
         return cls(
             customer_id=customer_id,
             order_date=order_date,
@@ -226,12 +223,12 @@ class Payment:
         cls,
         order_id: int,
         amount: float,
-        payment_date: Optional[datetime] = None,
+        payment_date: datetime | None = None,
         status: str = PaymentStatus.COMPLETED,
     ) -> Payment:
         method = _weighted_choice(PaymentMethod.ALL, PaymentMethod.WEIGHTS)
         if payment_date is None:
-            payment_date = datetime.now(tz=timezone.utc)
+            payment_date = datetime.now(tz=UTC)
         return cls(
             order_id=order_id,
             method=method,
@@ -259,15 +256,15 @@ class Shipment:
     order_id: int
     carrier: str
     delivery_status: str
-    shipped_date: Optional[datetime]
-    delivered_date: Optional[datetime]
+    shipped_date: datetime | None
+    delivered_date: datetime | None
 
     @classmethod
     def generate(
         cls,
         order_id: int,
-        shipped_date: Optional[datetime] = None,
-        delivered_date: Optional[datetime] = None,
+        shipped_date: datetime | None = None,
+        delivered_date: datetime | None = None,
         delivery_status: str = DeliveryStatus.PENDING,
     ) -> Shipment:
         carrier = _weighted_choice(Carrier.ALL, Carrier.WEIGHTS)

@@ -89,13 +89,11 @@ def get_environment() -> str:
     value = os.getenv("ENVIRONMENT", "").strip().lower()
     if not value:
         raise ConfigurationError(
-            "ENVIRONMENT variable is not set. "
-            f"Set it to one of: {sorted(Environment.ALL)}"
+            "ENVIRONMENT variable is not set. " f"Set it to one of: {sorted(Environment.ALL)}"
         )
     if value not in Environment.ALL:
         raise ConfigurationError(
-            f"ENVIRONMENT={value!r} is not valid. "
-            f"Must be one of: {sorted(Environment.ALL)}"
+            f"ENVIRONMENT={value!r} is not valid. " f"Must be one of: {sorted(Environment.ALL)}"
         )
     return value
 
@@ -193,32 +191,70 @@ class ProductCategory:
 
 class ProductBrand:
     ALL: Final = [
-        "Nexon", "PeakWear", "HomeFirst", "SwiftGear", "PageTurner",
-        "GlowLab", "FunZone", "NutriCo", "TechPlus", "UrbanEdge",
-        "AlphaCore", "BrightLeaf", "SkyLine", "EarthWorks", "PurePulse",
+        "Nexon",
+        "PeakWear",
+        "HomeFirst",
+        "SwiftGear",
+        "PageTurner",
+        "GlowLab",
+        "FunZone",
+        "NutriCo",
+        "TechPlus",
+        "UrbanEdge",
+        "AlphaCore",
+        "BrightLeaf",
+        "SkyLine",
+        "EarthWorks",
+        "PurePulse",
     ]
 
 
 # Price ranges per category (min, max) in EUR
 CATEGORY_PRICE_RANGE: Final[dict[str, tuple[float, float]]] = {
-    ProductCategory.ELECTRONICS:  (29.99,  1499.99),
-    ProductCategory.CLOTHING:     (9.99,   299.99),
-    ProductCategory.HOME_GARDEN:  (4.99,   499.99),
-    ProductCategory.SPORTS:       (14.99,  399.99),
-    ProductCategory.BOOKS:        (4.99,   49.99),
-    ProductCategory.BEAUTY:       (5.99,   149.99),
-    ProductCategory.TOYS:         (7.99,   199.99),
-    ProductCategory.FOOD:         (1.99,   59.99),
+    ProductCategory.ELECTRONICS: (29.99, 1499.99),
+    ProductCategory.CLOTHING: (9.99, 299.99),
+    ProductCategory.HOME_GARDEN: (4.99, 499.99),
+    ProductCategory.SPORTS: (14.99, 399.99),
+    ProductCategory.BOOKS: (4.99, 49.99),
+    ProductCategory.BEAUTY: (5.99, 149.99),
+    ProductCategory.TOYS: (7.99, 199.99),
+    ProductCategory.FOOD: (1.99, 59.99),
 }
 
 # Countries with relative weights reflecting typical European e-commerce traffic
 CUSTOMER_COUNTRIES: Final[list[str]] = [
-    "Germany", "France", "United Kingdom", "Netherlands", "Spain",
-    "Italy", "Poland", "Belgium", "Sweden", "Austria",
-    "Switzerland", "Portugal", "Denmark", "Finland", "Ireland",
+    "Germany",
+    "France",
+    "United Kingdom",
+    "Netherlands",
+    "Spain",
+    "Italy",
+    "Poland",
+    "Belgium",
+    "Sweden",
+    "Austria",
+    "Switzerland",
+    "Portugal",
+    "Denmark",
+    "Finland",
+    "Ireland",
 ]
 CUSTOMER_COUNTRY_WEIGHTS: Final[list[int]] = [
-    20, 15, 15, 8, 8, 8, 5, 4, 4, 3, 3, 2, 2, 2, 1,
+    20,
+    15,
+    15,
+    8,
+    8,
+    8,
+    5,
+    4,
+    4,
+    3,
+    3,
+    2,
+    2,
+    2,
+    1,
 ]
 
 CANCELLATION_RATE: Final[float] = 0.05
@@ -239,8 +275,7 @@ class DatabaseConfig:
 
     @classmethod
     def from_env(cls) -> DatabaseConfig:
-        missing = [v for v in ("DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD")
-                   if not os.getenv(v)]
+        missing = [v for v in ("DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD") if not os.getenv(v)]
         if missing:
             raise ConfigurationError(
                 f"Missing required environment variables: {missing}. "
