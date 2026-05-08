@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import random
 import secrets
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -42,7 +43,7 @@ from simulator.config import (
 )
 
 
-def _weighted_choice(choices: list[str], weights: list[float]) -> str:
+def _weighted_choice(choices: list[str], weights: Sequence[float]) -> str:
     """Single weighted random choice. Wraps random.choices for readability."""
     return str(random.choices(choices, weights=weights, k=1)[0])
 
