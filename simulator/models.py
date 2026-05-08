@@ -42,9 +42,9 @@ from simulator.config import (
 )
 
 
-def _weighted_choice(choices: list, weights: list) -> str:
+def _weighted_choice(choices: list[str], weights: list[float]) -> str:
     """Single weighted random choice. Wraps random.choices for readability."""
-    return random.choices(choices, weights=weights, k=1)[0]
+    return str(random.choices(choices, weights=weights, k=1)[0])
 
 
 def _random_price(category: str) -> float:
@@ -52,7 +52,7 @@ def _random_price(category: str) -> float:
     lo, hi = CATEGORY_PRICE_RANGE[category]
     # Use a skewed distribution: most prices cluster toward the lower end.
     price = lo + (hi - lo) * (random.random() ** 1.5)
-    return round(price, 2)
+    return float(round(price, 2))
 
 
 # ── Customer ──────────────────────────────────────────────────────────────────
