@@ -12,13 +12,13 @@ No database is needed — models are pure Python dataclasses.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from faker import Faker
 
+from simulator.config import DeliveryStatus, OrderStatus, PaymentStatus
 from simulator.models import Customer, Order, OrderItem, Payment, Product, Shipment
-from simulator.config import OrderStatus, PaymentStatus, DeliveryStatus
 
 
 @pytest.fixture(scope="module")
@@ -187,7 +187,7 @@ class TestPayment:
         assert len(payment.as_insert_tuple()) == 5
 
     def test_as_insert_tuple_column_order(self):
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         payment = Payment.generate(order_id=5, amount=75.50, payment_date=now)
         t = payment.as_insert_tuple()
         # (order_id, method, amount, status, payment_date)
@@ -217,7 +217,7 @@ class TestShipment:
         assert len(shipment.as_insert_tuple()) == 5
 
     def test_as_insert_tuple_column_order(self):
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         shipment = Shipment.generate(order_id=7, shipped_date=now)
         t = shipment.as_insert_tuple()
         # (order_id, carrier, delivery_status, shipped_date, delivered_date)

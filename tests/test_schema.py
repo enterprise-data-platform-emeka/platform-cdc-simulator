@@ -8,8 +8,6 @@ Integration tests that actually create and drop the schema live in test_db.py.
 
 from __future__ import annotations
 
-import pytest
-
 from simulator.schema import (
     ALL_CREATE_STATEMENTS,
     ALL_DROP_STATEMENTS,
@@ -25,9 +23,7 @@ ALL_TABLES = ["customers", "products", "orders", "order_items", "payments", "shi
 class TestCreateTablesSQL:
     def test_all_tables_are_created(self):
         for table in ALL_TABLES:
-            assert table in CREATE_TABLES_SQL, (
-                f"Table '{table}' not found in CREATE_TABLES_SQL"
-            )
+            assert table in CREATE_TABLES_SQL, f"Table '{table}' not found in CREATE_TABLES_SQL"
 
     def test_all_tables_have_primary_key(self):
         assert CREATE_TABLES_SQL.count("PRIMARY KEY") == len(ALL_TABLES)
@@ -49,9 +45,9 @@ class TestReplicaIdentitySQL:
         complete UPDATE and DELETE events from the WAL.
         """
         for table in ALL_TABLES:
-            assert table in SET_REPLICA_IDENTITY_SQL, (
-                f"REPLICA IDENTITY FULL not set for table '{table}'"
-            )
+            assert (
+                table in SET_REPLICA_IDENTITY_SQL
+            ), f"REPLICA IDENTITY FULL not set for table '{table}'"
 
     def test_uses_full_not_default(self):
         """REPLICA IDENTITY DEFAULT only captures the PK. We need FULL."""
@@ -62,9 +58,7 @@ class TestReplicaIdentitySQL:
 class TestDropTablesSQL:
     def test_all_tables_are_dropped(self):
         for table in ALL_TABLES:
-            assert table in DROP_TABLES_SQL, (
-                f"Table '{table}' not found in DROP_TABLES_SQL"
-            )
+            assert table in DROP_TABLES_SQL, f"Table '{table}' not found in DROP_TABLES_SQL"
 
     def test_uses_cascade(self):
         """CASCADE is required to drop tables with foreign key references."""

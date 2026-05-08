@@ -17,8 +17,7 @@ from __future__ import annotations
 
 import logging
 import random
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 import psycopg2
 from faker import Faker
@@ -35,7 +34,6 @@ from simulator.db import DatabaseManager
 from simulator.exceptions import SeedError
 from simulator.models import (
     Customer,
-    Order,
     OrderItem,
     Payment,
     Product,
@@ -104,8 +102,7 @@ class Seeder:
     def _seed_products(self) -> None:
         logger.info("Seeding %d products", self._config.num_products)
         products = [
-            Product.generate(self._fake).as_insert_tuple()
-            for _ in range(self._config.num_products)
+            Product.generate(self._fake).as_insert_tuple() for _ in range(self._config.num_products)
         ]
         try:
             inserted = self._db.execute_many(
@@ -146,10 +143,8 @@ class Seeder:
         orders_inserted = 0
 
         for i in range(self._config.num_historical_orders):
-            order_date = self._fake.date_time_between(
-                start_date="-2y", end_date="-1d", tzinfo=timezone.utc
-            )
-            days_ago = (datetime.now(tz=timezone.utc) - order_date).days
+            order_date = self._fake.date_time_between(start_date="-2y", end_date="-1d", tzinfo=UTC)
+            days_ago = (datetime.now(tz=UTC) - order_date).days
             customer_id = random.choice(customer_ids)
             final_status, payment_status, delivery_status = self._determine_lifecycle(days_ago)
 
@@ -232,9 +227,7 @@ class Seeder:
             orders_inserted,
         )
 
-    def _insert_order(
-        self, customer_id: int, order_date: datetime, order_status: str
-    ) -> int:
+    def _insert_order(self, customer_id: int, order_date: datetime, order_status: str) -> int:
         """
         Insert a single order and return its generated order_id.
 
@@ -253,9 +246,7 @@ class Seeder:
             )
         return int(row[0])
 
-    def _determine_lifecycle(
-        self, days_ago: int
-    ) -> tuple[str, str, str]:
+    def _determine_lifecycle(self, days_ago: int) -> tuple[str, str, str]:
         """
         Decide the final state of a historical order based on its age.
 
@@ -275,18 +266,24 @@ class Seeder:
             return OrderStatus.DELIVERED, PaymentStatus.COMPLETED, DeliveryStatus.DELIVERED
 
         if days_ago > 7:
-            status = random.choice([OrderStatus.DELIVERED, OrderStatus.SHIPPED, OrderStatus.PROCESSING])
+            status = random.choice(
+                [OrderStatus.DELIVERED, OrderStatus.SHIPPED, OrderStatus.PROCESSING]
+            )
         elif days_ago > 3:
-            status = random.choice([OrderStatus.PROCESSING, OrderStatus.CONFIRMED, OrderStatus.SHIPPED])
+            status = random.choice(
+                [OrderStatus.PROCESSING, OrderStatus.CONFIRMED, OrderStatus.SHIPPED]
+            )
         else:
-            status = random.choice([OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.PROCESSING])
+            status = random.choice(
+                [OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.PROCESSING]
+            )
 
         delivery_status = {
-            OrderStatus.PENDING:    DeliveryStatus.PENDING,
-            OrderStatus.CONFIRMED:  DeliveryStatus.PENDING,
+            OrderStatus.PENDING: DeliveryStatus.PENDING,
+            OrderStatus.CONFIRMED: DeliveryStatus.PENDING,
             OrderStatus.PROCESSING: DeliveryStatus.PENDING,
-            OrderStatus.SHIPPED:    DeliveryStatus.IN_TRANSIT,
-            OrderStatus.DELIVERED:  DeliveryStatus.DELIVERED,
+            OrderStatus.SHIPPED: DeliveryStatus.IN_TRANSIT,
+            OrderStatus.DELIVERED: DeliveryStatus.DELIVERED,
         }.get(status, DeliveryStatus.PENDING)
 
         return status, PaymentStatus.COMPLETED, delivery_status
