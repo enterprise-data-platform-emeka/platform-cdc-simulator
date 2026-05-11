@@ -3,17 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>platform-cdc-simulator — HTML README</title>
+  <title>platform-cdc-simulator — Visual CDC Guide</title>
   <style>
     :root {
-      --accent: #7c3aed;
-      --page: #f8fafc;
-      --surface: #ffffff;
-      --surface-soft: #f1f5f9;
+      --accent: #2563eb;
+      --teal: #0f766e;
+      --violet: #7c3aed;
+      --amber: #d97706;
+      --rose: #be123c;
       --ink: #0f172a;
-      --muted: #475569;
-      --line: #d8e2ee;
-      --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+      --muted: #526175;
+      --page: #f5f8fb;
+      --surface: rgba(255,255,255,0.9);
+      --soft: #eef4fa;
+      --line: #d6e0ec;
+      --shadow: 0 22px 70px rgba(15,23,42,0.11);
     }
     * { box-sizing: border-box; }
     body {
@@ -21,133 +25,93 @@
       color: var(--ink);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background:
-        radial-gradient(circle at top left, color-mix(in srgb, var(--accent) 12%, transparent), transparent 34rem),
+        linear-gradient(rgba(37,99,235,0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(37,99,235,0.035) 1px, transparent 1px),
+        radial-gradient(circle at 8% 0%, rgba(37,99,235,0.17), transparent 34rem),
+        radial-gradient(circle at 92% 8%, rgba(15,118,110,0.14), transparent 32rem),
         var(--page);
+      background-size: 44px 44px, 44px 44px, auto, auto, auto;
     }
     a { color: var(--accent); text-decoration: none; }
     .topbar {
       position: sticky;
       top: 0;
-      z-index: 10;
+      z-index: 20;
       display: flex;
+      align-items: center;
       justify-content: space-between;
-      align-items: center;
       gap: 1rem;
-      padding: 0.9rem 1.4rem;
+      padding: 0.85rem 1.4rem;
       border-bottom: 1px solid var(--line);
-      background: rgba(255,255,255,0.92);
-      backdrop-filter: blur(14px);
+      background: rgba(255,255,255,0.88);
+      backdrop-filter: blur(18px);
     }
-    .brand { display: flex; align-items: center; gap: 0.75rem; font-weight: 900; }
-    .mark {
-      width: 38px;
-      height: 38px;
-      border-radius: 10px;
-      display: grid;
-      place-items: center;
-      color: #fff;
-      background: var(--accent);
-      box-shadow: 0 10px 22px color-mix(in srgb, var(--accent) 28%, transparent);
-      font-size: 0.8rem;
-    }
-    .nav { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-    .nav a {
-      padding: 0.52rem 0.75rem;
+    .brand { display: flex; align-items: center; gap: 0.75rem; font-weight: 950; }
+    .mark { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: linear-gradient(135deg, var(--accent), var(--teal)); color: #fff; box-shadow: 0 14px 28px rgba(37,99,235,0.25); font-size: 0.78rem; }
+    .nav { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .nav a { padding: 0.52rem 0.78rem; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,0.82); color: var(--muted); font-weight: 850; font-size: 0.86rem; }
+    .wrap { width: min(1280px, calc(100vw - 2rem)); margin: 0 auto; padding: 1.2rem 0 4rem; }
+    .hero { display: grid; grid-template-columns: minmax(0,1.35fr) minmax(280px,0.65fr); gap: 1rem; margin: 1rem 0; }
+    .hero-card, .panel, .diagram-card, .concept-card {
       border: 1px solid var(--line);
-      border-radius: 999px;
-      background: #fff;
-      color: var(--muted);
-      font-size: 0.86rem;
-      font-weight: 750;
-    }
-    .wrap { width: min(1180px, calc(100vw - 2rem)); margin: 0 auto; padding: 1.2rem 0 4rem; }
-    .hero {
-      display: grid;
-      grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
-      gap: 1rem;
-      align-items: stretch;
-      margin-top: 1rem;
-    }
-    .hero-card, .panel {
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      background: rgba(255,255,255,0.94);
+      border-radius: 24px;
+      background: var(--surface);
       box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
     }
-    .hero-card { padding: 2rem; }
-    .eyebrow {
-      color: var(--accent);
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      font-size: 0.72rem;
-      font-weight: 950;
-    }
-    h1 {
-      margin: 0.45rem 0 0.8rem;
-      max-width: 820px;
-      font-size: clamp(2.2rem, 5vw, 4.4rem);
-      line-height: 0.95;
-      letter-spacing: -0.05em;
-    }
-    .intro { max-width: 820px; color: var(--muted); font-size: 1.03rem; line-height: 1.65; }
-    .meta {
-      display: grid;
-      gap: 0.7rem;
-      padding: 1rem;
-    }
-    .metric {
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 1rem;
-      background: var(--surface-soft);
-    }
-    .metric span { display: block; color: var(--muted); font-size: 0.78rem; font-weight: 750; }
-    .metric strong { display: block; margin-top: 0.35rem; font-size: 1.6rem; color: var(--ink); }
-    .diagram { margin: 1rem 0; overflow: hidden; border-radius: 22px; border: 1px solid var(--line); box-shadow: var(--shadow); }
-    .diagram svg { display: block; width: 100%; height: auto; }
-    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; }
-    .panel { padding: 1.1rem; }
-    .panel h2, .panel h3 { margin: 0; }
-    .panel h2 { font-size: 1.25rem; }
-    .panel h3 { font-size: 1rem; }
-    .panel p { color: var(--muted); line-height: 1.58; }
-    .section-card {
-      min-height: 170px;
-      display: flex;
-      flex-direction: column;
-      gap: 0.7rem;
-      border-top: 4px solid var(--accent);
-    }
-    .pill-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.85rem; }
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-      padding: 0.42rem 0.62rem;
-      border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
-      border-radius: 999px;
-      background: color-mix(in srgb, var(--accent) 7%, #fff);
-      color: #1f2937;
-      font-size: 0.83rem;
-      font-weight: 750;
-    }
-    .command-list { display: grid; gap: 0.55rem; margin-top: 0.9rem; }
-    code {
-      display: block;
-      padding: 0.74rem 0.85rem;
-      border-radius: 12px;
-      background: #111827;
-      color: #f8fafc;
-      overflow-wrap: anywhere;
-      font-family: "SFMono-Regular", "JetBrains Mono", monospace;
-      font-size: 0.84rem;
-    }
-    .wide { grid-column: 1 / -1; }
-    .footer { margin-top: 1.5rem; color: var(--muted); text-align: center; font-size: 0.9rem; }
+    .hero-card { padding: 2.1rem; background: linear-gradient(135deg, rgba(37,99,235,0.08), rgba(15,118,110,0.06) 45%, rgba(255,255,255,0.96)); }
+    .eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.72rem; font-weight: 950; }
+    h1 { margin: 0.45rem 0 0.75rem; font-size: clamp(2.25rem,5vw,4.6rem); line-height: 0.95; letter-spacing: -0.045em; }
+    h2 { margin: 0.35rem 0 0.7rem; font-size: clamp(1.35rem,3vw,2.1rem); letter-spacing: -0.035em; }
+    h3 { margin: 0; font-size: 1.02rem; }
+    p { color: var(--muted); line-height: 1.58; }
+    .tags { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem; }
+    .tags span { padding: 0.45rem 0.68rem; border-radius: 999px; border: 1px solid rgba(37,99,235,0.22); background: rgba(37,99,235,0.07); font-size: 0.83rem; font-weight: 850; color: #1f2937; }
+    .stats { display: grid; gap: 0.75rem; padding: 1rem; }
+    .metric { padding: 0.95rem; border: 1px solid var(--line); border-radius: 16px; background: var(--soft); }
+    .metric span { display: block; color: var(--muted); font-size: 0.76rem; font-weight: 850; }
+    .metric strong { display: block; margin-top: 0.25rem; font-size: 1.55rem; }
+    .diagram-card { margin: 1rem 0; overflow-x: auto; background: #fff; }
+    .diagram-card header { padding: 1.1rem 1.2rem 0; }
+    .diagram-card svg { display: block; min-width: 1060px; width: 100%; height: auto; }
+    .diagram-heading { fill: var(--ink); font-size: 24px; font-weight: 950; }
+    .diagram-subtitle { fill: var(--muted); font-size: 14px; }
+    .node-title, .actor-label { fill: var(--ink); font-size: 13px; font-weight: 900; }
+    .node-sub { fill: var(--muted); font-size: 11px; font-weight: 750; }
+    .layer-label { fill: #334155; font-size: 12px; font-weight: 900; }
+    .aws-node, .entity-node, .actor-box, .record-node { fill: #fff; stroke: #bfdbfe; stroke-width: 1.5; }
+    .source-node { stroke: var(--teal); stroke-width: 2; }
+    .bronze-node { stroke: var(--amber); stroke-width: 2; }
+    .silver-node { stroke: #16a34a; stroke-width: 2; }
+    .risk-node { stroke: var(--rose); stroke-width: 2; }
+    .zone { fill: rgba(37,99,235,0.045); stroke: #bfdbfe; }
+    .zone-green { fill: rgba(15,118,110,0.055); stroke: #99f6e4; }
+    .zone-amber { fill: rgba(217,119,6,0.07); stroke: #fed7aa; }
+    .zone-violet { fill: rgba(124,58,237,0.06); stroke: #ddd6fe; }
+    .flow-arrow .hit { stroke: transparent; stroke-width: 18; fill: none; pointer-events: stroke; }
+    .flow-arrow .line { fill: none; stroke: #334155; stroke-width: 2.4; marker-end: url(#arrow-dark); transition: stroke .18s ease, stroke-width .18s ease, filter .18s ease; }
+    .flow-arrow.accent .line { stroke: var(--accent); marker-end: url(#arrow-accent); }
+    .flow-arrow.good .line { stroke: var(--teal); marker-end: url(#arrow-teal); }
+    .flow-arrow.warn .line { stroke: var(--amber); marker-end: url(#arrow-amber); }
+    .flow-arrow.risk .line { stroke: var(--rose); marker-end: url(#arrow-rose); stroke-dasharray: 7 6; }
+    .flow-arrow.return .line { stroke: #64748b; stroke-dasharray: 6 6; }
+    .flow-arrow:hover .line { stroke: var(--accent); stroke-width: 4; stroke-dasharray: 12 8; animation: flowDash .8s linear infinite; filter: drop-shadow(0 0 8px rgba(37,99,235,.62)); marker-end: url(#arrow-accent); }
+    .flow-arrow text { fill: var(--ink); font-size: 12px; font-weight: 820; pointer-events: none; }
+    .flow-arrow:hover text { fill: var(--accent); font-weight: 950; }
+    @keyframes flowDash { to { stroke-dashoffset: -40; } }
+    .explain { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .75rem; padding: 0 1.2rem 1.2rem; }
+    .explain div, .concept-card { padding: .95rem; border: 1px solid var(--line); border-radius: 18px; background: rgba(255,255,255,.86); box-shadow: none; }
+    .explain strong, .concept-card h3 { display: block; margin-bottom: .28rem; }
+    .explain span, .concept-card p { color: var(--muted); font-size: .9rem; line-height: 1.45; }
+    .concept-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 1rem; margin: 1rem 0; }
+    .mini-flow { display: flex; gap: .45rem; align-items: center; flex-wrap: wrap; margin: .85rem 0; }
+    .mini-node { padding: .42rem .58rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; font-size: .78rem; font-weight: 850; }
+    .mini-arrow { color: var(--accent); font-weight: 950; }
+    .footer { color: var(--muted); text-align: center; font-size: .9rem; margin-top: 1.4rem; }
     @media (max-width: 900px) {
-      .hero, .grid { grid-template-columns: 1fr; }
-      .topbar { align-items: flex-start; flex-direction: column; }
-      h1 { font-size: 2.4rem; }
+      .topbar { flex-direction: column; align-items: flex-start; }
+      .hero, .concept-grid, .explain { grid-template-columns: 1fr; }
+      .diagram-card svg { min-width: 980px; }
     }
   </style>
 </head>
@@ -155,153 +119,266 @@
   <header class="topbar">
     <div class="brand"><div class="mark">EDP</div><span>platform-cdc-simulator</span></div>
     <nav class="nav">
-      <a href="../README.md">README.md</a>
-      <a href="#diagram">Diagram</a>
-      <a href="#sections">Sections</a>
-      <a href="#commands">Commands</a>
+      <a href="https://github.com/enterprise-data-platform-emeka/platform-cdc-simulator/blob/main/README.md">README.md</a>
+      <a href="#platform-flow">Platform Flow</a>
+      <a href="#cdc">CDC vs Polling</a>
+      <a href="#model">Data Model</a>
+      <a href="#bronze">Bronze Records</a>
     </nav>
   </header>
 
   <main class="wrap">
     <section class="hero">
       <div class="hero-card">
-        <div class="eyebrow">PostgreSQL change-data simulator</div>
+        <div class="eyebrow">Visual CDC source guide</div>
         <h1>platform-cdc-simulator</h1>
-        <p class="intro">This repository is part of the Enterprise Data Platform. For the full project overview, architecture diagram, and build order, start there.</p>
-        <div class="pill-row">
-          <span class="pill">Python</span><span class="pill">PostgreSQL</span><span class="pill">Docker</span><span class="pill">pytest</span><span class="pill">RDS</span><span class="pill">DMS</span>
+        <p>This repo creates realistic e-commerce source activity. It writes customers, products, orders, payments, and shipments into PostgreSQL so AWS DMS can capture the changes and land raw events in Bronze S3.</p>
+        <div class="tags">
+          <span>PostgreSQL OLTP</span><span>WAL</span><span>CDC</span><span>AWS DMS</span><span>Bronze S3</span><span>Faker data</span><span>SSM tunnel</span><span>Docker local DB</span>
         </div>
       </div>
-      <aside class="panel meta" aria-label="README summary">
-        <div class="metric"><span>README length</span><strong>909</strong></div>
-        <div class="metric"><span>Major sections</span><strong>8</strong></div>
-        <div class="metric"><span>Code examples</span><strong>35</strong></div>
-        <div class="metric"><span>Tables</span><strong>69</strong></div>
+      <aside class="panel stats">
+        <div class="metric"><span>Source tables</span><strong>6</strong></div>
+        <div class="metric"><span>Seed orders in dev</span><strong>2k</strong></div>
+        <div class="metric"><span>Default new orders/tick</span><strong>3</strong></div>
+        <div class="metric"><span>CDC operation types</span><strong>I/U/D</strong></div>
       </aside>
     </section>
 
-    <section id="diagram" class="diagram">
-      
-    <svg viewBox="0 0 1120 260" role="img" aria-label="Repository workflow diagram">
-      <defs>
-        <marker id="arrow" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
-          <path d="M0,0 L0,6 L8,3 z" fill="#7c3aed"/>
-        </marker>
-        <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
-          <stop stop-color="#7c3aed" stop-opacity="0.12"/>
-          <stop offset="1" stop-color="#ffffff" stop-opacity="1"/>
-        </linearGradient>
-      </defs>
-      <rect x="0" y="0" width="1120" height="260" rx="24" fill="url(#bg)"/>
-      <text x="32" y="48" fill="#0f172a" font-size="24" font-weight="900">How this repository fits into the platform</text>
-      <text x="32" y="76" fill="#475569" font-size="14">A compact visual reading path distilled from the README.</text>
-      
-        <g>
-          <rect x="24" y="96" width="158" height="72" rx="16" fill="#ffffff" stroke="#d8e2ee"/>
-          <circle cx="48" cy="132" r="12" fill="#7c3aed" opacity="0.14"/>
-          <circle cx="48" cy="132" r="5" fill="#7c3aed"/>
-          <text x="68" y="127" fill="#0f172a" font-size="15" font-weight="800">Seed data</text>
-          <text x="68" y="148" fill="#64748b" font-size="12">Step 1</text>
-          <path d="M 186 130 L 198 130" stroke="#7c3aed" stroke-width="3" marker-end="url(#arrow)" opacity="0.72"/>
-        </g>
-        <g>
-          <rect x="206" y="96" width="158" height="72" rx="16" fill="#ffffff" stroke="#d8e2ee"/>
-          <circle cx="230" cy="132" r="12" fill="#7c3aed" opacity="0.14"/>
-          <circle cx="230" cy="132" r="5" fill="#7c3aed"/>
-          <text x="250" y="127" fill="#0f172a" font-size="15" font-weight="800">OLTP tables</text>
-          <text x="250" y="148" fill="#64748b" font-size="12">Step 2</text>
-          <path d="M 368 130 L 380 130" stroke="#7c3aed" stroke-width="3" marker-end="url(#arrow)" opacity="0.72"/>
-        </g>
-        <g>
-          <rect x="388" y="96" width="158" height="72" rx="16" fill="#ffffff" stroke="#d8e2ee"/>
-          <circle cx="412" cy="132" r="12" fill="#7c3aed" opacity="0.14"/>
-          <circle cx="412" cy="132" r="5" fill="#7c3aed"/>
-          <text x="432" y="127" fill="#0f172a" font-size="15" font-weight="800">Updates</text>
-          <text x="432" y="148" fill="#64748b" font-size="12">Step 3</text>
-          <path d="M 550 130 L 562 130" stroke="#7c3aed" stroke-width="3" marker-end="url(#arrow)" opacity="0.72"/>
-        </g>
-        <g>
-          <rect x="570" y="96" width="158" height="72" rx="16" fill="#ffffff" stroke="#d8e2ee"/>
-          <circle cx="594" cy="132" r="12" fill="#7c3aed" opacity="0.14"/>
-          <circle cx="594" cy="132" r="5" fill="#7c3aed"/>
-          <text x="614" y="127" fill="#0f172a" font-size="15" font-weight="800">Deletes</text>
-          <text x="614" y="148" fill="#64748b" font-size="12">Step 4</text>
-          <path d="M 732 130 L 744 130" stroke="#7c3aed" stroke-width="3" marker-end="url(#arrow)" opacity="0.72"/>
-        </g>
-        <g>
-          <rect x="752" y="96" width="158" height="72" rx="16" fill="#ffffff" stroke="#d8e2ee"/>
-          <circle cx="776" cy="132" r="12" fill="#7c3aed" opacity="0.14"/>
-          <circle cx="776" cy="132" r="5" fill="#7c3aed"/>
-          <text x="796" y="127" fill="#0f172a" font-size="15" font-weight="800">DMS CDC</text>
-          <text x="796" y="148" fill="#64748b" font-size="12">Step 5</text>
-          <path d="M 914 130 L 926 130" stroke="#7c3aed" stroke-width="3" marker-end="url(#arrow)" opacity="0.72"/>
-        </g>
-        <g>
-          <rect x="934" y="96" width="158" height="72" rx="16" fill="#ffffff" stroke="#d8e2ee"/>
-          <circle cx="958" cy="132" r="12" fill="#7c3aed" opacity="0.14"/>
-          <circle cx="958" cy="132" r="5" fill="#7c3aed"/>
-          <text x="978" y="127" fill="#0f172a" font-size="15" font-weight="800">Bronze</text>
-          <text x="978" y="148" fill="#64748b" font-size="12">Step 6</text>
-          
-        </g>
-    </svg>
+    <section class="diagram-card" id="platform-flow">
+      <header>
+        <div class="eyebrow">Where this repo fits</div>
+        <h2>The simulator creates the source events for the whole platform</h2>
+      </header>
+      <svg viewBox="0 0 1280 600" role="img" aria-label="CDC simulator platform flow">
+        <defs>
+          <marker id="arrow-dark" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#334155"/></marker>
+          <marker id="arrow-accent" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#2563eb"/></marker>
+          <marker id="arrow-teal" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#0f766e"/></marker>
+          <marker id="arrow-amber" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#d97706"/></marker>
+          <marker id="arrow-rose" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#be123c"/></marker>
+        </defs>
+        <rect x="0" y="0" width="1280" height="600" rx="28" fill="#f8fbff"/>
+        <text x="42" y="48" class="diagram-heading">Source traffic to Bronze S3</text>
+        <text x="42" y="75" class="diagram-subtitle">The simulator does not clean analytics data. It creates realistic source changes so DMS and downstream jobs have something real to process.</text>
+
+        <rect class="zone-violet" x="55" y="125" width="260" height="330" rx="26"/>
+        <text x="185" y="156" text-anchor="middle" class="layer-label">This repository</text>
+        <rect class="aws-node source-node" x="95" y="190" width="180" height="58" rx="16"/><text x="185" y="215" text-anchor="middle" class="node-title">make schema</text><text x="185" y="234" text-anchor="middle" class="node-sub">tables + triggers</text>
+        <rect class="aws-node source-node" x="95" y="285" width="180" height="58" rx="16"/><text x="185" y="310" text-anchor="middle" class="node-title">make seed</text><text x="185" y="329" text-anchor="middle" class="node-sub">historical orders</text>
+        <rect class="aws-node source-node" x="95" y="380" width="180" height="58" rx="16"/><text x="185" y="405" text-anchor="middle" class="node-title">make simulate</text><text x="185" y="424" text-anchor="middle" class="node-sub">live changes</text>
+
+        <rect class="zone" x="370" y="125" width="250" height="330" rx="26"/>
+        <text x="495" y="156" text-anchor="middle" class="layer-label">PostgreSQL source</text>
+        <rect class="aws-node source-node" x="410" y="200" width="170" height="64" rx="16"/><text x="495" y="227" text-anchor="middle" class="node-title">OLTP tables</text><text x="495" y="246" text-anchor="middle" class="node-sub">6 related tables</text>
+        <rect class="aws-node source-node" x="410" y="335" width="170" height="64" rx="16"/><text x="495" y="362" text-anchor="middle" class="node-title">WAL</text><text x="495" y="381" text-anchor="middle" class="node-sub">committed changes</text>
+
+        <rect class="zone-amber" x="675" y="125" width="250" height="330" rx="26"/>
+        <text x="800" y="156" text-anchor="middle" class="layer-label">AWS DMS</text>
+        <rect class="aws-node bronze-node" x="715" y="200" width="170" height="64" rx="16"/><text x="800" y="227" text-anchor="middle" class="node-title">Full Load</text><text x="800" y="246" text-anchor="middle" class="node-sub">initial snapshot</text>
+        <rect class="aws-node bronze-node" x="715" y="335" width="170" height="64" rx="16"/><text x="800" y="362" text-anchor="middle" class="node-title">CDC Stream</text><text x="800" y="381" text-anchor="middle" class="node-sub">I / U / D records</text>
+
+        <rect class="zone-green" x="980" y="125" width="250" height="330" rx="26"/>
+        <text x="1105" y="156" text-anchor="middle" class="layer-label">Data lake handoff</text>
+        <rect class="aws-node bronze-node" x="1020" y="200" width="170" height="64" rx="16"/><text x="1105" y="227" text-anchor="middle" class="node-title">Bronze S3</text><text x="1105" y="246" text-anchor="middle" class="node-sub">raw Parquet events</text>
+        <rect class="aws-node silver-node" x="1020" y="335" width="170" height="64" rx="16"/><text x="1105" y="362" text-anchor="middle" class="node-title">Glue next</text><text x="1105" y="381" text-anchor="middle" class="node-sub">reconcile to Silver</text>
+
+        <g class="flow-arrow good"><path class="hit" d="M185 248 V285"/><path class="line" d="M185 248 V285"/><text x="202" y="271">schema first</text></g>
+        <g class="flow-arrow good"><path class="hit" d="M185 343 V380"/><path class="line" d="M185 343 V380"/><text x="202" y="366">then live loop</text></g>
+        <g class="flow-arrow accent"><path class="hit" d="M275 314 C330 285 360 232 410 232"/><path class="line" d="M275 314 C330 285 360 232 410 232"/><text x="310" y="278">SQL writes</text></g>
+        <g class="flow-arrow accent"><path class="hit" d="M495 264 V335"/><path class="line" d="M495 264 V335"/><text x="512" y="307">every commit is logged</text></g>
+        <g class="flow-arrow warn"><path class="hit" d="M580 367 H715"/><path class="line" d="M580 367 H715"/><text x="620" y="356">DMS reads WAL</text></g>
+        <g class="flow-arrow warn"><path class="hit" d="M885 232 H1020"/><path class="line" d="M885 232 H1020"/><text x="930" y="221">LOAD files</text></g>
+        <g class="flow-arrow warn"><path class="hit" d="M885 367 H1020"/><path class="line" d="M885 367 H1020"/><text x="922" y="356">CDC parquet</text></g>
+        <g class="flow-arrow good"><path class="hit" d="M1105 264 V335"/><path class="line" d="M1105 264 V335"/><text x="1122" y="306">downstream</text></g>
+
+        <rect x="160" y="500" width="960" height="62" rx="22" fill="rgba(37,99,235,0.055)" stroke="#bfdbfe"/>
+        <text x="230" y="537" text-anchor="middle" class="layer-label">Bronze</text>
+        <text x="370" y="537" text-anchor="middle" class="layer-label">Glue Silver</text>
+        <text x="520" y="537" text-anchor="middle" class="layer-label">dbt Gold</text>
+        <text x="684" y="537" text-anchor="middle" class="layer-label">Analytics Agent</text>
+        <text x="900" y="537" text-anchor="middle" class="layer-label">Streamlit · HTML · Slack</text>
+        <g class="flow-arrow accent"><path class="hit" d="M270 532 H330"/><path class="line" d="M270 532 H330"/></g>
+        <g class="flow-arrow accent"><path class="hit" d="M420 532 H470"/><path class="line" d="M420 532 H470"/></g>
+        <g class="flow-arrow accent"><path class="hit" d="M570 532 H620"/><path class="line" d="M570 532 H620"/></g>
+        <g class="flow-arrow accent"><path class="hit" d="M760 532 H820"/><path class="line" d="M760 532 H820"/></g>
+      </svg>
+      <div class="explain">
+        <div><strong>Repository boundary</strong><span>This repo creates tables and writes source transactions. It does not own DMS, Bronze S3, Glue, dbt, or the agent.</span></div>
+        <div><strong>Why the WAL matters</strong><span>PostgreSQL writes committed changes to the WAL. DMS reads that log instead of repeatedly querying source tables.</span></div>
+        <div><strong>Bronze is raw</strong><span>Bronze keeps every event DMS writes. Cleaning, deduplication, and latest-row selection happen later in Glue.</span></div>
+      </div>
     </section>
 
-    <section class="grid" id="sections">
-      <article class="panel wide">
-        <div class="eyebrow">README compressed</div>
-        <h2>Read this page first, then use README.md for exact commands and edge cases.</h2>
-        <p>This HTML explainer keeps the same intent as the root README but converts the long-form markdown into a visual map, compact summaries, and a short workflow reference.</p>
-      </article>
-      
-      <article class="panel section-card">
-        <h3>Contents</h3>
-        <p>- Before you start: Understanding CDC, WAL, and DMS - Glossary - How this repository connects to the platform - Where each part is implemented - What lands in Bronze S3 - What the simulator does - Data model - How much data it creates - Prerequisites - Local s</p>
-      </article>
-      <article class="panel section-card">
-        <h3>Before you start: Understanding CDC, WAL, and DMS</h3>
-        <p>Three concepts drive this repository: CDC (Change Data Capture), WAL (Write-Ahead Log), and DMS (Database Migration Service). Once those are clear, the rest of the platform becomes much easier to follow. The problem: how do you keep a data warehouse in sync wi</p>
-      </article>
-      <article class="panel section-card">
-        <h3>Glossary</h3>
-        <p>Term Meaning in this project --- --- CDC (Change Data Capture) Capturing row-level database changes as events instead of repeatedly querying tables. WAL (Write-Ahead Log) PostgreSQL&#039;s internal log of changes. PostgreSQL writes here before the table data is fin</p>
-      </article>
-      <article class="panel section-card">
-        <h3>How this repository connects to the platform</h3>
-        <p>This repository generates the source data. Everything downstream depends on it. Read this flow in four small stages: 1. This repo creates and changes rows in PostgreSQL. 2. PostgreSQL records those changes in the WAL. 3. AWS DMS reads the WAL and writes raw Pa</p>
-      </article>
-      <article class="panel section-card">
-        <h3>Where each part is implemented</h3>
-        <p>Some parts of the CDC flow are implemented in this repository. Other parts are managed by PostgreSQL or by Terraform in the infrastructure repository. Platform part What owns it Where to inspect it --- --- --- CLI commands ( schema , seed , simulate , reset ) </p>
-      </article>
-      <article class="panel section-card">
-        <h3>What lands in Bronze S3</h3>
-        <p>This is the key concept to understand before working with the rest of the platform. In a real e-commerce system, one order goes through multiple status changes. It starts as pending , gets confirmed, ships, and eventually delivers. Each of those status changes</p>
-      </article>
-      <article class="panel section-card">
-        <h3>What the simulator does</h3>
-        <p>The simulator runs three phases in sequence. Each phase builds on the previous one. Every write the simulator makes lands in PostgreSQL&#039;s WAL, which DMS picks up and forwards to Bronze S3. ---</p>
-      </article>
-      <article class="panel section-card">
-        <h3>Data model</h3>
-        <p>Six tables that model a European e-commerce business. Two reference tables hold customers and products (they change rarely). Four transaction tables record business events. Table Key columns --- --- customers customer id, first name, last name, email, country,</p>
-      </article>
+    <section class="diagram-card" id="cdc">
+      <header>
+        <div class="eyebrow">CDC concept</div>
+        <h2>Why CDC is better than polling for this platform</h2>
+      </header>
+      <svg viewBox="0 0 1280 580" role="img" aria-label="Polling versus CDC comparison">
+        <defs>
+          <marker id="cdc-arrow-dark" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#334155"/></marker>
+          <marker id="cdc-arrow-accent" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#2563eb"/></marker>
+        </defs>
+        <rect x="0" y="0" width="1280" height="580" rx="28" fill="#fbfdff"/>
+        <text x="42" y="48" class="diagram-heading">Polling vs CDC</text>
+        <text x="42" y="75" class="diagram-subtitle">Polling asks the table what changed later. CDC follows the database change log as the changes happen.</text>
+
+        <rect class="zone-amber" x="70" y="120" width="520" height="355" rx="28"/>
+        <text x="330" y="154" text-anchor="middle" class="layer-label">Polling path: scheduled SELECT queries</text>
+        <rect class="aws-node risk-node" x="130" y="210" width="170" height="64" rx="16"/><text x="215" y="237" text-anchor="middle" class="node-title">orders table</text><text x="215" y="256" text-anchor="middle" class="node-sub">updated_at column</text>
+        <rect class="aws-node risk-node" x="375" y="210" width="170" height="64" rx="16"/><text x="460" y="237" text-anchor="middle" class="node-title">hourly job</text><text x="460" y="256" text-anchor="middle" class="node-sub">SELECT updated rows</text>
+        <rect class="aws-node risk-node" x="250" y="345" width="210" height="76" rx="16"/><text x="355" y="374" text-anchor="middle" class="node-title">Risk</text><text x="355" y="395" text-anchor="middle" class="node-sub">miss deletes, stale data, skipped states</text>
+        <g class="flow-arrow risk"><path class="hit" d="M300 242 H375"/><path class="line" d="M300 242 H375"/><text x="310" y="231">poll every hour</text></g>
+        <g class="flow-arrow risk"><path class="hit" d="M460 274 C455 315 410 334 355 345"/><path class="line" d="M460 274 C455 315 410 334 355 345"/></g>
+
+        <rect class="zone-green" x="690" y="120" width="520" height="355" rx="28"/>
+        <text x="950" y="154" text-anchor="middle" class="layer-label">CDC path: read committed changes</text>
+        <rect class="aws-node source-node" x="745" y="190" width="170" height="64" rx="16"/><text x="830" y="217" text-anchor="middle" class="node-title">PostgreSQL</text><text x="830" y="236" text-anchor="middle" class="node-sub">business writes</text>
+        <rect class="aws-node source-node" x="985" y="190" width="170" height="64" rx="16"/><text x="1070" y="217" text-anchor="middle" class="node-title">WAL</text><text x="1070" y="236" text-anchor="middle" class="node-sub">ordered log</text>
+        <rect class="aws-node bronze-node" x="745" y="335" width="170" height="64" rx="16"/><text x="830" y="362" text-anchor="middle" class="node-title">DMS</text><text x="830" y="381" text-anchor="middle" class="node-sub">replication client</text>
+        <rect class="aws-node bronze-node" x="985" y="335" width="170" height="64" rx="16"/><text x="1070" y="362" text-anchor="middle" class="node-title">Bronze S3</text><text x="1070" y="381" text-anchor="middle" class="node-sub">I / U / D events</text>
+        <g class="flow-arrow good"><path class="hit" d="M915 222 H985"/><path class="line" d="M915 222 H985"/><text x="925" y="211">commit first</text></g>
+        <g class="flow-arrow good"><path class="hit" d="M1070 254 C1065 304 900 310 830 335"/><path class="line" d="M1070 254 C1065 304 900 310 830 335"/><text x="938" y="302">subscribe</text></g>
+        <g class="flow-arrow good"><path class="hit" d="M915 367 H985"/><path class="line" d="M915 367 H985"/><text x="930" y="356">write parquet</text></g>
+      </svg>
+      <div class="explain">
+        <div><strong>Polling is an approximation</strong><span>It depends on timestamps and can miss intermediate status changes or deletes between polling windows.</span></div>
+        <div><strong>CDC follows the source of truth</strong><span>The database log already knows the exact order of committed changes. DMS reads that stream.</span></div>
+        <div><strong>Why this repo exists</strong><span>The simulator creates enough realistic change activity for CDC behavior to be visible in Bronze S3.</span></div>
+      </div>
     </section>
 
-    <section class="grid" id="commands">
-      <article class="panel">
-        <div class="eyebrow">Typical workflow</div>
-        <h2>Command path</h2>
-        <p>Representative commands surfaced from the README. Use the original README for complete setup and environment-specific values.</p>
-      </article>
-      <article class="panel wide">
-        <div class="command-list">
-          <code>| Term | Meaning in this project |</code><code>|---|---|</code><code>| Full Load | The first snapshot DMS takes: every existing row is copied once. |</code><code>| Athena | AWS query service that runs SQL directly against files in S3. |</code><code>| Parquet | A columnar file format used for efficient analytics queries on S3. |</code><code>| pyenv | Local Python version manager. The repo uses it to pin Python 3.11.8. |</code>
-        </div>
-      </article>
+    <section class="diagram-card" id="model">
+      <header>
+        <div class="eyebrow">Source data model</div>
+        <h2>The six OLTP tables and their relationships</h2>
+      </header>
+      <svg viewBox="0 0 1280 620" role="img" aria-label="E-commerce source data model">
+        <defs>
+          <marker id="model-arrow-dark" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#334155"/></marker>
+          <marker id="model-arrow-accent" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#2563eb"/></marker>
+        </defs>
+        <rect x="0" y="0" width="1280" height="620" rx="28" fill="#f8fbff"/>
+        <text x="42" y="48" class="diagram-heading">E-commerce OLTP schema</text>
+        <text x="42" y="75" class="diagram-subtitle">The simulator writes relational data in a realistic dependency order so foreign keys make sense.</text>
+
+        <rect class="entity-node source-node" x="95" y="145" width="210" height="98" rx="18"/><text x="200" y="176" text-anchor="middle" class="node-title">customers</text><text x="200" y="199" text-anchor="middle" class="node-sub">customer_id, country, signup_date</text><text x="200" y="218" text-anchor="middle" class="node-sub">reference entity</text>
+        <rect class="entity-node source-node" x="95" y="375" width="210" height="98" rx="18"/><text x="200" y="406" text-anchor="middle" class="node-title">products</text><text x="200" y="429" text-anchor="middle" class="node-sub">product_id, category, price</text><text x="200" y="448" text-anchor="middle" class="node-sub">reference entity</text>
+
+        <rect class="entity-node source-node" x="500" y="240" width="220" height="112" rx="20"/><text x="610" y="273" text-anchor="middle" class="node-title">orders</text><text x="610" y="296" text-anchor="middle" class="node-sub">order_id, customer_id</text><text x="610" y="315" text-anchor="middle" class="node-sub">order_status, order_date</text><text x="610" y="334" text-anchor="middle" class="node-sub">changes often</text>
+
+        <rect class="entity-node source-node" x="920" y="120" width="220" height="92" rx="18"/><text x="1030" y="151" text-anchor="middle" class="node-title">payments</text><text x="1030" y="174" text-anchor="middle" class="node-sub">payment_id, order_id</text><text x="1030" y="193" text-anchor="middle" class="node-sub">method, status, amount</text>
+        <rect class="entity-node source-node" x="920" y="260" width="220" height="92" rx="18"/><text x="1030" y="291" text-anchor="middle" class="node-title">order_items</text><text x="1030" y="314" text-anchor="middle" class="node-sub">order_id + product_id</text><text x="1030" y="333" text-anchor="middle" class="node-sub">quantity, line_total</text>
+        <rect class="entity-node source-node" x="920" y="400" width="220" height="92" rx="18"/><text x="1030" y="431" text-anchor="middle" class="node-title">shipments</text><text x="1030" y="454" text-anchor="middle" class="node-sub">shipment_id, order_id</text><text x="1030" y="473" text-anchor="middle" class="node-sub">carrier, delivery_status</text>
+
+        <g class="flow-arrow accent"><path class="hit" d="M305 194 C390 190 430 260 500 292"/><path class="line" d="M305 194 C390 190 430 260 500 292"/><text x="374" y="210">customer_id</text></g>
+        <g class="flow-arrow accent"><path class="hit" d="M720 296 H920"/><path class="line" d="M720 296 H920"/><text x="792" y="285">order_id</text></g>
+        <g class="flow-arrow accent"><path class="hit" d="M305 424 C470 422 780 334 920 306"/><path class="line" d="M305 424 C470 422 780 334 920 306"/><text x="580" y="414">product_id</text></g>
+        <g class="flow-arrow accent"><path class="hit" d="M720 280 C800 230 840 170 920 166"/><path class="line" d="M720 280 C800 230 840 170 920 166"/><text x="790" y="222">payment belongs to order</text></g>
+        <g class="flow-arrow accent"><path class="hit" d="M720 315 C800 365 840 442 920 446"/><path class="line" d="M720 315 C800 365 840 442 920 446"/><text x="782" y="392">shipment belongs to order</text></g>
+
+        <rect x="92" y="535" width="1088" height="44" rx="16" fill="rgba(15,118,110,0.07)" stroke="#99f6e4"/>
+        <text x="636" y="563" text-anchor="middle" class="layer-label">Every table has updated_at triggers and REPLICA IDENTITY FULL so UPDATE/DELETE events contain enough row context for DMS.</text>
+      </svg>
+      <div class="explain">
+        <div><strong>Reference data first</strong><span>Customers and products are created before orders so transaction rows can reference valid keys.</span></div>
+        <div><strong>Orders are the center</strong><span>Payments, shipments, and order items all hang off the order. Status changes create useful CDC updates.</span></div>
+        <div><strong>Realistic relationships</strong><span>The model behaves like an application database, which makes downstream Bronze and Silver logic more meaningful.</span></div>
+      </div>
     </section>
 
-    <p class="footer">Generated from README.md. Existing markdown remains the source of truth.</p>
+    <section class="diagram-card" id="bronze">
+      <header>
+        <div class="eyebrow">What lands in Bronze</div>
+        <h2>One business order becomes many raw CDC records</h2>
+      </header>
+      <svg viewBox="0 0 1280 650" role="img" aria-label="Bronze CDC records for one order">
+        <defs>
+          <marker id="bronze-arrow-dark" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#334155"/></marker>
+          <marker id="bronze-arrow-accent" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#2563eb"/></marker>
+        </defs>
+        <rect x="0" y="0" width="1280" height="650" rx="28" fill="#fbfdff"/>
+        <text x="42" y="48" class="diagram-heading">Raw event stream for order_id 123</text>
+        <text x="42" y="75" class="diagram-subtitle">Bronze preserves each event. Silver later chooses the latest valid current-state row.</text>
+
+        <rect class="zone-amber" x="60" y="125" width="460" height="400" rx="28"/>
+        <text x="290" y="156" text-anchor="middle" class="layer-label">Bronze S3: append-only raw events</text>
+        <rect class="record-node bronze-node" x="115" y="205" width="350" height="58" rx="16"/><text x="290" y="230" text-anchor="middle" class="node-title">op=I · pending</text><text x="290" y="249" text-anchor="middle" class="node-sub">order created</text>
+        <rect class="record-node bronze-node" x="115" y="285" width="350" height="58" rx="16"/><text x="290" y="310" text-anchor="middle" class="node-title">op=U · confirmed</text><text x="290" y="329" text-anchor="middle" class="node-sub">same order changed status</text>
+        <rect class="record-node bronze-node" x="115" y="365" width="350" height="58" rx="16"/><text x="290" y="390" text-anchor="middle" class="node-title">op=U · shipped</text><text x="290" y="409" text-anchor="middle" class="node-sub">same order changed again</text>
+        <rect class="record-node bronze-node" x="115" y="445" width="350" height="58" rx="16"/><text x="290" y="470" text-anchor="middle" class="node-title">op=U · delivered</text><text x="290" y="489" text-anchor="middle" class="node-sub">latest event wins later</text>
+
+        <rect class="zone" x="620" y="150" width="250" height="330" rx="28"/>
+        <text x="745" y="182" text-anchor="middle" class="layer-label">Glue CDC logic</text>
+        <rect class="aws-node source-node" x="660" y="230" width="170" height="58" rx="16"/><text x="745" y="255" text-anchor="middle" class="node-title">Group by key</text><text x="745" y="274" text-anchor="middle" class="node-sub">order_id</text>
+        <rect class="aws-node source-node" x="660" y="315" width="170" height="58" rx="16"/><text x="745" y="340" text-anchor="middle" class="node-title">Sort newest first</text><text x="745" y="359" text-anchor="middle" class="node-sub">_dms_timestamp</text>
+        <rect class="aws-node source-node" x="660" y="400" width="170" height="58" rx="16"/><text x="745" y="425" text-anchor="middle" class="node-title">Keep latest</text><text x="745" y="444" text-anchor="middle" class="node-sub">unless op=D</text>
+
+        <rect class="zone-green" x="970" y="220" width="240" height="180" rx="28"/>
+        <text x="1090" y="252" text-anchor="middle" class="layer-label">Silver S3</text>
+        <rect class="record-node silver-node" x="1015" y="300" width="150" height="58" rx="16"/><text x="1090" y="325" text-anchor="middle" class="node-title">order_id 123</text><text x="1090" y="344" text-anchor="middle" class="node-sub">status=delivered</text>
+
+        <g class="flow-arrow warn"><path class="hit" d="M465 234 C540 236 585 252 660 259"/><path class="line" d="M465 234 C540 236 585 252 660 259"/></g>
+        <g class="flow-arrow warn"><path class="hit" d="M465 314 C550 316 585 335 660 344"/><path class="line" d="M465 314 C550 316 585 335 660 344"/></g>
+        <g class="flow-arrow warn"><path class="hit" d="M465 394 C550 395 585 420 660 429"/><path class="line" d="M465 394 C550 395 585 420 660 429"/></g>
+        <g class="flow-arrow warn"><path class="hit" d="M465 474 C560 470 600 440 660 429"/><path class="line" d="M465 474 C560 470 600 440 660 429"/><text x="520" y="510">all four records are kept in Bronze</text></g>
+        <g class="flow-arrow good"><path class="hit" d="M830 429 C900 420 945 350 1015 329"/><path class="line" d="M830 429 C900 420 945 350 1015 329"/><text x="890" y="390">clean current state</text></g>
+      </svg>
+      <div class="explain">
+        <div><strong>Bronze is the audit trail</strong><span>It is normal to see multiple rows for the same business key. Each row is a source event.</span></div>
+        <div><strong>Silver is the current view</strong><span>Glue sorts records by DMS timestamp, keeps the latest valid row, and handles deletes explicitly.</span></div>
+        <div><strong>Why status updates matter</strong><span>Cancellations, refunds, shipping progress, and delivery events create the update records needed to test reconciliation.</span></div>
+      </div>
+    </section>
+
+    <section class="diagram-card" id="replica">
+      <header>
+        <div class="eyebrow">Critical database setting</div>
+        <h2>Why REPLICA IDENTITY FULL is applied to every table</h2>
+      </header>
+      <svg viewBox="0 0 1280 520" role="img" aria-label="Replica identity full explanation">
+        <defs>
+          <marker id="rep-arrow-dark" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#334155"/></marker>
+          <marker id="rep-arrow-accent" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#2563eb"/></marker>
+        </defs>
+        <rect x="0" y="0" width="1280" height="520" rx="28" fill="#f8fbff"/>
+        <text x="42" y="48" class="diagram-heading">UPDATE event row context</text>
+        <text x="42" y="75" class="diagram-subtitle">DMS needs complete row context in Bronze so downstream jobs can rebuild the latest entity without querying PostgreSQL again.</text>
+
+        <rect class="zone-amber" x="80" y="130" width="490" height="270" rx="28"/>
+        <text x="325" y="162" text-anchor="middle" class="layer-label">Without FULL</text>
+        <rect class="aws-node risk-node" x="135" y="220" width="380" height="78" rx="18"/><text x="325" y="250" text-anchor="middle" class="node-title">WAL may contain only key + changed column</text><text x="325" y="272" text-anchor="middle" class="node-sub">order_id=123 · order_status=delivered</text>
+        <rect class="aws-node risk-node" x="165" y="330" width="320" height="48" rx="14"/><text x="325" y="360" text-anchor="middle" class="node-title">Downstream context is incomplete</text>
+
+        <rect class="zone-green" x="710" y="130" width="490" height="270" rx="28"/>
+        <text x="955" y="162" text-anchor="middle" class="layer-label">With REPLICA IDENTITY FULL</text>
+        <rect class="aws-node source-node" x="765" y="220" width="380" height="78" rx="18"/><text x="955" y="250" text-anchor="middle" class="node-title">WAL includes full row context</text><text x="955" y="272" text-anchor="middle" class="node-sub">order_id, customer_id, status, dates, totals...</text>
+        <rect class="aws-node source-node" x="795" y="330" width="320" height="48" rx="14"/><text x="955" y="360" text-anchor="middle" class="node-title">Bronze record is complete</text>
+
+        <g class="flow-arrow risk"><path class="hit" d="M515 259 H710"/><path class="line" d="M515 259 H710"/><text x="575" y="248">missing fields hurt Silver</text></g>
+      </svg>
+      <div class="explain">
+        <div><strong>UPDATEs need context</strong><span>A changed status alone is not enough for the lake. Bronze should contain enough columns to reconstruct the current row.</span></div>
+        <div><strong>DELETEs need keys</strong><span>If a row is deleted, Glue still needs to know which business entity was deleted.</span></div>
+        <div><strong>The simulator applies it</strong><span>The schema code sets REPLICA IDENTITY FULL on all six tables before DMS starts reading changes.</span></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="eyebrow">Concept map</div>
+      <h2>The CDC ideas this repo teaches</h2>
+      <div class="concept-grid">
+        <article class="concept-card"><h3>Full Load + CDC</h3><div class="mini-flow"><span class="mini-node">snapshot</span><span class="mini-arrow">→</span><span class="mini-node">ongoing changes</span><span class="mini-arrow">→</span><span class="mini-node">Bronze</span></div><p>DMS first copies existing rows, then keeps streaming new committed changes from the WAL.</p></article>
+        <article class="concept-card"><h3>OLTP traffic</h3><div class="mini-flow"><span class="mini-node">orders</span><span class="mini-arrow">→</span><span class="mini-node">payments</span><span class="mini-arrow">→</span><span class="mini-node">shipments</span></div><p>The simulator behaves like a business application, producing many small relational writes instead of static files.</p></article>
+        <article class="concept-card"><h3>Bronze vs Silver</h3><div class="mini-flow"><span class="mini-node">raw events</span><span class="mini-arrow">→</span><span class="mini-node">reconcile</span><span class="mini-arrow">→</span><span class="mini-node">latest state</span></div><p>Bronze stores history. Silver is where Glue creates a clean current-state view.</p></article>
+        <article class="concept-card"><h3>Local vs cloud</h3><div class="mini-flow"><span class="mini-node">Docker PostgreSQL</span><span class="mini-arrow">or</span><span class="mini-node">RDS via SSM</span></div><p>Local development uses Docker. Cloud simulation connects privately to RDS through an SSM tunnel.</p></article>
+        <article class="concept-card"><h3>Reproducible data</h3><div class="mini-flow"><span class="mini-node">Faker</span><span class="mini-arrow">→</span><span class="mini-node">seed</span><span class="mini-arrow">→</span><span class="mini-node">simulate</span></div><p>The data is realistic enough for demos but repeatable enough for testing.</p></article>
+        <article class="concept-card"><h3>Clear ownership</h3><div class="mini-flow"><span class="mini-node">this repo writes</span><span class="mini-arrow">→</span><span class="mini-node">DMS copies</span><span class="mini-arrow">→</span><span class="mini-node">Glue cleans</span></div><p>The simulator owns source writes only. Other repos own replication infrastructure and downstream transformation.</p></article>
+      </div>
+    </section>
+
+    <p class="footer">Use this page to understand the CDC source visually; use the rendered README for exact setup commands, environment variables, and troubleshooting.</p>
   </main>
 </body>
 </html>
