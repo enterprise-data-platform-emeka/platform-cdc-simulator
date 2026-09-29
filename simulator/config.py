@@ -309,6 +309,9 @@ class SeedConfig:
     num_products: int
     num_historical_orders: int
     random_seed: int
+    profile: str = "smoke"
+    start_date: str = "2023-09-01"
+    end_date: str = "2026-09-01"
 
     @classmethod
     def from_env(cls, limits: EnvironmentLimits) -> SeedConfig:
@@ -318,13 +321,25 @@ class SeedConfig:
         This means dev automatically seeds 500 customers, staging seeds 1000,
         and prod seeds 2000, without you having to remember to change the values.
         """
+        profile = os.getenv("SEED_PROFILE", "smoke")
+        if profile not in ("smoke", "customer-intelligence-36m"):
+            raise ConfigurationError("Unknown SEED_PROFILE")
+        large = profile == "customer-intelligence-36m"
         return cls(
-            num_customers=int(os.getenv("SEED_CUSTOMERS", str(limits.seed_customers))),
-            num_products=int(os.getenv("SEED_PRODUCTS", str(limits.seed_products))),
+            num_customers=int(
+                os.getenv("SEED_CUSTOMERS", str(20_000 if large else limits.seed_customers))
+            ),
+            num_products=int(
+                os.getenv("SEED_PRODUCTS", str(1_500 if large else limits.seed_products))
+            ),
             num_historical_orders=int(
-                os.getenv("SEED_HISTORICAL_ORDERS", str(limits.seed_historical_orders))
+                os.getenv(
+                    "SEED_HISTORICAL_ORDERS",
+                    str(300_000 if large else limits.seed_historical_orders),
+                )
             ),
             random_seed=int(os.getenv("SEED_RANDOM_SEED", "42")),
+            profile=profile,
         )
 
 

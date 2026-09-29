@@ -94,29 +94,9 @@ def _table_exists(db: DatabaseManager, table_name: str) -> bool:
 
 
 def cmd_bootstrap(db: DatabaseManager, seed_config: SeedConfig) -> None:
-    """
-    Idempotently prepare an empty source database.
-
-    This is the command CI/CD should use. It creates the schema when tables do
-    not exist and seeds only when the core customer table is empty. It never
-    drops existing data.
-    """
-    if not _table_exists(db, "customers"):
-        logger.info("No source schema detected — creating schema")
-        cmd_schema(db)
-    else:
-        logger.info("Source schema already exists — leaving it in place")
-
-    row = db.fetch_one("SELECT COUNT(*) FROM customers")
-    customer_count = int(row[0]) if row else 0
-    if customer_count == 0:
-        logger.info("Source tables are empty — seeding historical data")
-        cmd_seed(db, seed_config)
-    else:
-        logger.info(
-            "Source tables already contain %d customers — skipping seed",
-            customer_count,
-        )
+    """Create missing schema and atomically load or validate the same seed."""
+    cmd_schema(db)
+    cmd_seed(db, seed_config)
 
 
 def cmd_simulate(

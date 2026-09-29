@@ -26,7 +26,7 @@ class TestCreateTablesSQL:
             assert table in CREATE_TABLES_SQL, f"Table '{table}' not found in CREATE_TABLES_SQL"
 
     def test_all_tables_have_primary_key(self):
-        assert CREATE_TABLES_SQL.count("PRIMARY KEY") == len(ALL_TABLES)
+        assert CREATE_TABLES_SQL.count("PRIMARY KEY") == len(ALL_TABLES) + 2
 
     def test_updated_at_on_all_tables(self):
         """Every table must have an updated_at column for CDC change tracking."""

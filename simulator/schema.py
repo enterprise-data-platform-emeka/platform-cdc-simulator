@@ -86,6 +86,21 @@ CREATE TABLE IF NOT EXISTS shipments (
     delivered_date   TIMESTAMPTZ,
     updated_at       TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS seed_event_history (
+    event_id BIGSERIAL PRIMARY KEY,
+    entity_type TEXT NOT NULL,
+    entity_id BIGINT NOT NULL,
+    event_time TIMESTAMPTZ NOT NULL,
+    available_time TIMESTAMPTZ NOT NULL CHECK (available_time >= event_time),
+    payload JSONB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS seed_manifest (
+    seed_id TEXT PRIMARY KEY,
+    specification JSONB NOT NULL,
+    row_counts JSONB NOT NULL,
+    content_sha256 TEXT NOT NULL,
+    loaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 """
 
 CREATE_INDEXES_SQL: str = """
@@ -130,6 +145,8 @@ ALTER TABLE shipments   REPLICA IDENTITY FULL;
 # ── Schema teardown ───────────────────────────────────────────────────────────
 
 DROP_TABLES_SQL: str = """
+DROP TABLE IF EXISTS seed_event_history CASCADE;
+DROP TABLE IF EXISTS seed_manifest CASCADE;
 DROP TABLE IF EXISTS shipments   CASCADE;
 DROP TABLE IF EXISTS payments    CASCADE;
 DROP TABLE IF EXISTS order_items CASCADE;

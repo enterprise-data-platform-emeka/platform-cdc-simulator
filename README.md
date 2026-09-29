@@ -1,5 +1,32 @@
 > **Prefer a visual version?** Open the [responsive HTML README](https://enterprise-data-platform-emeka.github.io/platform-cdc-simulator/html/?v=latest).
 
+
+## Current historical seed contract
+
+The historical generator uses fixed dates, 2023-09-01 through 2026-08-31,
+with seed 42. `SEED_PROFILE=customer-intelligence-36m` produces 20,000 customers,
+1,500 products and 300,000 orders. The default CLI `smoke` profile uses the
+existing per-environment counts with the same 36-month generator.
+
+Bootstrap is atomic and idempotent for the exact same completed seed. It checks
+a versioned manifest and row counts. Partial, legacy, changed or live-mutated
+data is rejected rather than silently reused; replacement requires explicit
+reset or a fresh daily session. The container defaults to bootstrap, not live
+simulation. Live injection is enabled only by the session workflow's
+`seed-and-live` mode.
+
+`seed_event_history` captures synthetic entity states with event and simulated
+availability times; `seed_manifest` records counts and a canonical checksum.
+Actual PostgreSQL/DMS load timestamps remain real ingestion times. Hidden
+customer behaviour regimes are never exported as features or target labels.
+Purchases respect signup and product launch dates. Product preferences,
+seasonality, inactivity/reactivation, retries, refunds and late events are
+stochastic but reproducible. The existing six business tables remain compatible.
+
+Session Destroy empties the daily dataset in S3; the next seed-only start
+rebuilds it from code. Source history is not yet a governed Silver history
+feature store. SQL labels and model evaluation remain separate work packages.
+
 # platform-cdc-simulator
 
 This repository is part of the [Enterprise Data Platform](https://github.com/enterprise-data-platform-emeka/platform-docs). For the full project overview, architecture diagram, and build order, start there.
@@ -325,7 +352,7 @@ flowchart TB
     P3["make simulate"]:::phase
 
     N1["Creates 6 tables:\ncustomers, products, orders,\norder_items, payments, shipments\n\nSets REPLICA IDENTITY FULL\non every table so DMS captures\nthe complete row on every UPDATE\n\nAdds updated_at triggers"]:::note
-    N2["Fills the database with\n2 years of realistic historical data:\n500 customers, 200 products,\n2,000 orders (dev environment)\n\nOrders have realistic status\ndistributions: most are delivered,\na fraction cancelled or refunded"]:::note
+    N2["Fills the database with\n36 months of fixed historical data:\n500 customers, 200 products,\n2,000 orders (dev environment)\n\nOrders have realistic status\ndistributions: most are delivered,\na fraction cancelled or refunded"]:::note
     N3["Runs a continuous loop:\nevery 2 seconds:\n3 new orders placed\nExisting orders advance\nthrough their lifecycle\nPayments and shipments created\nOccasional cancellations and refunds\n\nCtrl+C to stop"]:::note
 
     P1 --> N1 --> P2 --> N2 --> P3 --> N3
@@ -508,7 +535,7 @@ Wait for the output `PostgreSQL is ready.` before continuing.
 
 ```bash
 make schema    # create the six tables, indexes, and triggers
-make seed      # fill with 2 years of historical data
+make seed      # fill with 36 months of historical data
 ```
 
 **Step 6: Run the simulator**
@@ -632,7 +659,7 @@ make test-integration   # run integration tests (requires a running PostgreSQL)
 
 # Simulator — local Docker (reads .env)
 make schema             # create tables, indexes, triggers
-make seed               # seed 2 years of historical data
+make seed               # seed 36 months of historical data
 make simulate           # run the live traffic loop (Ctrl+C to stop)
 make reset              # drop + recreate + reseed (destroys all data)
 
@@ -810,7 +837,7 @@ flowchart TD
     end
 
     subgraph l4["Layer 4 — Business Logic"]
-        SEED["seed.py\nSeeder\n2 years of historical data"]:::logic
+        SEED["seed.py\nSeeder\n36 months of historical data"]:::logic
         SIM["simulate.py\nSimulator\nLive traffic loop"]:::logic
         SCH["schema.py\nDDL SQL strings\nCREATE, DROP, REPLICA IDENTITY"]:::logic
     end
