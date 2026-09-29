@@ -36,7 +36,7 @@ COPY --chown=simulator:simulator main.py .
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# Default command: simulate. Override with "schema", "seed", or "reset" as needed.
+# Default command: bootstrap. Live simulation requires the explicit "simulate" command.
 # Example: docker run cdc-simulator:latest seed
 ENTRYPOINT ["python", "main.py"]
-CMD ["simulate"]
+CMD ["bootstrap"]

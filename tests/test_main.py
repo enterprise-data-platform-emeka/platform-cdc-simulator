@@ -34,18 +34,15 @@ def test_cmd_bootstrap_creates_and_seeds_empty_database(dev_limits) -> None:
     cmd_seed.assert_called_once_with(db, seed_config)
 
 
-def test_cmd_bootstrap_skips_seed_when_data_exists(dev_limits) -> None:
+def test_cmd_bootstrap_validates_existing_seed(dev_limits) -> None:
     from simulator.config import SeedConfig
 
     db = MagicMock()
-    db.fetch_one.side_effect = [(True,), (12,)]
-    seed_config = SeedConfig.from_env(dev_limits)
-
-    with patch("main.cmd_schema") as cmd_schema, patch("main.cmd_seed") as cmd_seed:
-        cmd_bootstrap(db, seed_config)
-
-    cmd_schema.assert_not_called()
-    cmd_seed.assert_not_called()
+    config = SeedConfig.from_env(dev_limits)
+    with patch("main.cmd_schema") as schema, patch("main.cmd_seed") as seed:
+        cmd_bootstrap(db, config)
+    schema.assert_called_once_with(db)
+    seed.assert_called_once_with(db, config)
 
 
 def test_cmd_simulate_passes_duration_to_runner(dev_limits) -> None:
