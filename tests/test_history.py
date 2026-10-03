@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pytest
 
-from simulator.config import SeedConfig
+from simulator.config import PaymentMethod, SeedConfig
 from simulator.history import HistoryGenerator, dataset_id
 
 
@@ -110,3 +110,30 @@ def test_seed_failure_rolls_back(db, monkeypatch):
         Seeder(db, SeedConfig(30, 16, 100, 42)).run()
     assert db.fetch_one("SELECT COUNT(*) FROM customers")[0] == 0
     assert db.fetch_one("SELECT COUNT(*) FROM seed_manifest")[0] == 0
+
+
+def test_payment_methods_match_platform_contract_in_snapshot_and_history(history):
+    _, data = history
+    # Both failed attempts and their settled payments must use canonical values.
+    allowed = set(PaymentMethod.ALL)
+    payments = data["payments"]
+    assert {row[4] for row in payments} >= {"failed", "completed", "refunded"}
+    assert all(row[2] in allowed for row in payments)
+    payment_events = [
+        json.loads(row[5]) for row in data["seed_event_history"] if row[1] == "payments"
+    ]
+    assert payment_events
+    assert all(event["method"] in allowed for event in payment_events)
+    snapshot_methods = {row[0]: row[2] for row in payments}
+    assert all(event["method"] == snapshot_methods[event["payment_id"]] for event in payment_events)
+
+
+def test_corrected_dataset_identity_differs_from_legacy_seed():
+    import hashlib
+
+    from simulator.history import specification
+
+    config = SeedConfig(500, 200, 2000, 42)
+    legacy = {**specification(config), "generator_version": "customer-history-v1"}
+    legacy_id = hashlib.sha256(json.dumps(legacy, sort_keys=True).encode()).hexdigest()
+    assert dataset_id(config) != legacy_id
