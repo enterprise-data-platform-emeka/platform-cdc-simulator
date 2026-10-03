@@ -949,3 +949,20 @@ After merging this correction, run Session Destroy and confirm session S3
 cleanup, then start a new `seed-only` session. Existing version-1 data must be
 regenerated; retrying downstream jobs or selecting `reuse-retained` does not
 repair it. Do not relax the dbt accepted-values test to accept the invalid seed.
+
+## Repair the historical payment-method contract
+
+`python main.py repair-payment-method` performs the guarded canonical
+`customer-history-v1` → `customer-history-v2` migration. Prefer **Session Recover →
+repair-seed-payments** in the session orchestrator so source, Bronze, Silver and Gold
+are updated together. Merge this command before running that recovery workflow.
+
+The command locks the synthetic source tables against writes, regenerates expected
+hashes, checks every business/history row and the manifest, then atomically changes
+`card` to `credit_card` in payment rows and event payloads and updates the canonical
+manifest. It refuses noncanonical/mutated data. Repeating it verifies v2 and exits
+successfully. A failure rolls back the transaction; successful completion emits a
+structured receipt in the private task log for downstream verification.
+
+This command does not reseed, delete tables or update S3. Running it alone leaves
+Bronze/Silver/Gold unchanged; use the recovery workflow to complete that propagation.
