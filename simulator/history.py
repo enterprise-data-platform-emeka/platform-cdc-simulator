@@ -19,11 +19,12 @@ from simulator.config import (
     CATEGORY_PRICE_RANGE,
     CUSTOMER_COUNTRIES,
     CUSTOMER_COUNTRY_WEIGHTS,
+    PaymentMethod,
     ProductCategory,
     SeedConfig,
 )
 
-GENERATOR_VERSION = "customer-history-v1"
+GENERATOR_VERSION = "customer-history-v2"
 TABLE_COLUMNS = {
     "customers": "customer_id,first_name,last_name,email,country,phone,signup_date",
     "products": "product_id,name,category,brand,unit_price,stock_qty",
@@ -273,7 +274,14 @@ class HistoryGenerator:
                 if not cancel and paid < self.end:
                     if rng.random() < 0.03:
                         payid += 1
-                        row = (payid, oid, "card", round(total, 2), "failed", date)
+                        row = (
+                            payid,
+                            oid,
+                            PaymentMethod.CREDIT_CARD,
+                            round(total, 2),
+                            "failed",
+                            date,
+                        )
                         yield "payments", row
                         yield (
                             "seed_event_history",
@@ -286,7 +294,7 @@ class HistoryGenerator:
                         )
                     payid += 1
                     status = "refunded" if refund and refunded < self.end else "completed"
-                    row = (payid, oid, "card", round(total, 2), status, paid)
+                    row = (payid, oid, PaymentMethod.CREDIT_CARD, round(total, 2), status, paid)
                     yield "payments", row
                     payload = dict(zip(TABLE_COLUMNS["payments"].split(","), row))
                     yield (
