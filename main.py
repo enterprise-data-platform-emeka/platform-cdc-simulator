@@ -136,7 +136,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "command",
-        choices=["bootstrap", "schema", "seed", "simulate", "reset", "repair-payment-method"],
+        choices=["bootstrap", "schema", "seed", "simulate", "reset"],
         help=(
             "bootstrap: create schema and seed only when empty. "
             "schema: create tables. "
@@ -202,10 +202,6 @@ def main() -> int:
                 if args.duration_seconds is not None and args.duration_seconds <= 0:
                     raise ConfigurationError("--duration-seconds must be greater than 0")
                 cmd_simulate(db, sim_config, duration_seconds=args.duration_seconds)
-            elif command == "repair-payment-method":
-                from simulator.repair import repair_payment_method
-
-                repair_payment_method(db)
             elif command == "reset":
                 cmd_reset(db, seed_config)
     except SimulatorError as exc:
